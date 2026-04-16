@@ -1,0 +1,42 @@
+[project]
+name = "echonote"
+version = "0.1.0"
+description = "音声ファイルから構造化テキスト記録を生成するローカル完結型アプリケーション"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "faster-whisper>=1.2",
+    "gradio>=5.0",
+    "python-docx",
+    "requests",
+]
+
+[project.optional-dependencies]
+diarization = [
+    "pyannote-audio>=3.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/echonote"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "ruff",
+]
