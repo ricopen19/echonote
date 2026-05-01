@@ -68,7 +68,7 @@ def transcribe(
     audio_path: str | Path,
     model_size: str,
     language: str,
-    settings: "Settings | None" = None,
+    settings: Settings | None = None,
 ) -> list[Segment]:
     """音声ファイルを転写して [{start, end, text}] を返す。"""
     _check_ffmpeg()

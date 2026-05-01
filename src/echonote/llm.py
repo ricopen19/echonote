@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Generator
+from collections.abc import Generator
 
 import requests
 

@@ -30,7 +30,7 @@ def _build_prompt(template_text: str, segments: list[cfg.Settings]) -> str:
 
 # ── Tab 1: 文字起こし ──────────────────────────────────────────────────────────
 
-def _do_transcribe(audio_path, model_size, language, progress=gr.Progress()):
+def _do_transcribe(audio_path, model_size, language, progress=gr.Progress()):  # noqa: B008
     if audio_path is None:
         raise gr.Error("音声ファイルをアップロードしてください。")
 
@@ -77,10 +77,9 @@ def _do_generate(segments, prompt_template, llm_url, llm_model):
 def _do_download_md(content: str):
     if not content:
         raise gr.Error("先に記録を生成してください。")
-    tmp = tempfile.NamedTemporaryFile(suffix=".md", delete=False, mode="w", encoding="utf-8")
-    tmp.write(content)
-    tmp.flush()
-    return tmp.name
+    with tempfile.NamedTemporaryFile(suffix=".md", delete=False, mode="w", encoding="utf-8") as tmp:
+        tmp.write(content)
+        return tmp.name
 
 
 # ── UI 構築 ───────────────────────────────────────────────────────────────────
