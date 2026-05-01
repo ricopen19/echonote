@@ -122,7 +122,7 @@ def build_ui() -> gr.Blocks:
                         model_dd = gr.Dropdown(
                             label="Whisper モデル",
                             choices=transcriber.WHISPER_MODELS,
-                            value=settings.default_whisper_model,
+                            value="small",
                         )
                         lang_dd = gr.Dropdown(
                             label="言語",

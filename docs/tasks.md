@@ -43,3 +43,4 @@
 - [ ] P3-3: セットアップスクリプト / ドキュメント整備（Mac / Win）
 - [ ] P3-4: Light ティア (8GB) 向けモデル最適化
 - [ ] P3-5: チームメンバーへの展開
+- [ ] P3-6: Playwright によるブラウザ自動テスト（`example-skills:webapp-testing` で設定）
