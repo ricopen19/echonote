@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import sys
+import traceback
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -83,8 +84,10 @@ def transcribe_stream(
         try:
             yield from _stream_mlx_whisper(audio_path, model_size, language)
             return
-        except ImportError:
-            pass  # mlx-whisper 未インストール → faster-whisper にフォールバック
+        except Exception:
+            # ImportError（未インストール）またはモデル取得失敗など → faster-whisper にフォールバック
+            traceback.print_exc()
+            print("[transcriber] mlx-whisper 失敗 → faster-whisper にフォールバック", flush=True)
 
     yield from _stream_faster_whisper(audio_path, model_size, language)
 

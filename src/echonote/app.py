@@ -61,8 +61,10 @@ def _do_transcribe(audio_path, model_size, language):
         ):
             segments.append(seg)
             yield segments, exporter.segments_to_transcript(segments)
-    except RuntimeError as e:
-        raise gr.Error(str(e)) from e
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise gr.Error(f"{type(e).__name__}: {e}") from e
 
 
 # ── Tab 2: 記録生成 ───────────────────────────────────────────────────────────
