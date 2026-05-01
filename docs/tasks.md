@@ -22,9 +22,17 @@
 ### 設計上の決定事項（Phase 1）
 
 - LLM クライアント: `requests`（pyproject.toml 既存依存）
-- HWティア検出: `psutil` で総RAM取得 → 8GB未満=Light / 12GB未満=Standard / それ以上=Performance。`ECHONOTE_HW_TIER` 環境変数で上書き可
+- HWティア検出: `psutil` で総RAM取得 → 8GB未満=Light / 12GB未満=Standard / それ以上=Performance
+- LLM 生成後に `keep_alive: 0` でモデルをアンロード（RAM解放）
 - 話者分離（diarizer.py）: Phase 2 以降
 - Word 出力（.docx）: Phase 2 以降
+
+### Windows 検証結果（2026-05-01）
+
+- i5-8500 16GB: `small` で実再生時間の半分程度、`medium` で安定品質
+- `medium` + 長時間音声で OOM クラッシュ → `keep_alive: 0` で改善
+- 8GB 環境では `small` のみ実用的（`medium` は OS 込みで限界）
+- setup.ps1 は UTF-8 日本語が Shift-JIS 誤読みされるため英語のみで作成
 
 ---
 
@@ -36,11 +44,14 @@
 - [ ] P2-4: 面接・授業プロンプトテンプレート追加
 - [ ] P2-5: Mac mlx-whisper 転写経路の統合
 
+---
+
 ## Phase 3（UX改善・展開）
 
 - [ ] P3-1: 進捗表示改善（pyannote ProgressHook、faster-whisper print_progress）
 - [ ] P3-2: 設定の永続化
-- [ ] P3-3: セットアップスクリプト / ドキュメント整備（Mac / Win）
+- [x] P3-3: セットアップスクリプト / ドキュメント整備（Mac / Win）— `setup.bat` / `scripts/setup.ps1`
 - [ ] P3-4: Light ティア (8GB) 向けモデル最適化
 - [ ] P3-5: チームメンバーへの展開
 - [ ] P3-6: Playwright によるブラウザ自動テスト（`example-skills:webapp-testing` で設定）
+- [ ] P3-7: 長時間音声のチャンク分割（OOM 対策）
