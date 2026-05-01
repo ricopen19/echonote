@@ -56,6 +56,7 @@ def complete(
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "stream": stream,
+        "keep_alive": 0,  # 生成完了後すぐにモデルをアンロードしてRAMを解放
     }
 
     try:
