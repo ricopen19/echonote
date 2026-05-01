@@ -6,12 +6,29 @@
 
 ## Windows セットアップ（初回のみ）
 
-### ステップ 1 — セットアップスクリプトを実行
+### ステップ 1 — ファイルを入手する
+
+**方法 A: ZIP ダウンロード（推奨・git 不要）**
+
+1. このページ右上の「Code」→「Download ZIP」をクリック
+2. ダウンロードした ZIP を右クリック →「すべて展開」
+3. 展開先のフォルダ（例: `C:\echonote`）を覚えておく
+
+**方法 B: git clone（更新を `git pull` で管理したい場合）**
+
+```powershell
+git clone https://github.com/ricopen19/echonote.git
+cd echonote
+```
+
+---
+
+### ステップ 2 — セットアップスクリプトを実行
 
 PowerShell を**管理者として**起動（スタートメニューで「PowerShell」を右クリック → 管理者として実行）し、以下を実行：
 
 ```powershell
-cd C:\path\to\echonote    # echonote フォルダの場所に合わせて変更
+cd C:\echonote          # 展開先フォルダに合わせて変更
 .\scripts\setup.ps1
 ```
 
@@ -19,7 +36,7 @@ cd C:\path\to\echonote    # echonote フォルダの場所に合わせて変更
 
 完了後、**PC を再起動**してください。
 
-### ステップ 2 — 以降は start.bat をダブルクリック
+### ステップ 3 — 以降は start.bat をダブルクリック
 
 `start.bat` をダブルクリックするとブラウザが開きます。
 
