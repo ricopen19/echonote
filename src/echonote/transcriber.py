@@ -84,10 +84,19 @@ def transcribe_stream(
         try:
             yield from _stream_mlx_whisper(audio_path, model_size, language)
             return
-        except Exception:
-            # ImportError（未インストール）またはモデル取得失敗など → faster-whisper にフォールバック
-            traceback.print_exc()
-            print("[transcriber] mlx-whisper 失敗 → faster-whisper にフォールバック", flush=True)
+        except ImportError:
+            print("[transcriber] mlx-whisper 未インストール → faster-whisper にフォールバック", flush=True)
+        except Exception as e:
+            # HuggingFace の 404 は既知の問題（モデル名がmlx-community に未登録）→ 静かにフォールバック
+            if "RepositoryNotFoundError" in type(e).__name__ or "404" in str(e):
+                print(
+                    f"[transcriber] mlx-community/whisper-{model_size} が HF に存在しません"
+                    " → faster-whisper にフォールバック",
+                    flush=True,
+                )
+            else:
+                traceback.print_exc()
+                print(f"[transcriber] mlx-whisper 失敗 ({type(e).__name__}) → faster-whisper FB", flush=True)
 
     yield from _stream_faster_whisper(audio_path, model_size, language)
 
