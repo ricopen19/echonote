@@ -8,17 +8,17 @@
 
 | ID | タスク | ファイル | 状態 |
 |---|---|---|---|
-| T1 | プラットフォーム・HWティア検出、設定管理 | `src/echonote/config.py` | 未着手 |
-| T2 | faster-whisper ラッパー（統一出力フォーマット） | `src/echonote/transcriber.py` | 未着手 |
-| T3 | OpenAI互換 LLM クライアント（到達性確認・ストリーミング） | `src/echonote/llm.py` | 未着手 |
-| T4 | Gradio UI（Tab構成・処理フロー接続） | `src/echonote/app.py` | 未着手 |
+| T1 | プラットフォーム・HWティア検出、設定管理 | `src/echonote/config.py` | ✅ 完了 |
+| T2 | faster-whisper ラッパー（統一出力フォーマット） | `src/echonote/transcriber.py` | ✅ 完了 |
+| T3 | OpenAI互換 LLM クライアント（到達性確認・ストリーミング） | `src/echonote/llm.py` | ✅ 完了 |
+| T4 | Gradio UI（Tab構成・処理フロー接続） | `src/echonote/app.py` | ✅ 完了 |
 
 ### Antigravity 担当
 
 | ID | タスク | ファイル | 状態 |
 |---|---|---|---|
-| A1 | Markdown 整形出力 | `src/echonote/exporter.py` | 未着手 |
-| A2 | 会議議事録プロンプトテンプレート | `src/echonote/prompts/meeting.txt` | 未着手 |
+| A1 | Markdown 整形出力 | `src/echonote/exporter.py` | ✅ 完了（Claude Codeで実施） |
+| A2 | 会議議事録プロンプトテンプレート | `src/echonote/prompts/meeting.txt` | ✅ 完了（Claude Codeで実施） |
 | A3 | transcriber ユニットテスト（faster-whisper モック） | `tests/test_transcriber.py` | 未着手 |
 | A4 | llm クライアントのユニットテスト（requests モック） | `tests/test_llm.py` | 未着手 |
 | A5 | exporter のユニットテスト | `tests/test_exporter.py` | 未着手 |
