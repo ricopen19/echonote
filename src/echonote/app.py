@@ -30,9 +30,26 @@ def _build_prompt(template_text: str, segments: list[cfg.Settings]) -> str:
 
 # ── Tab 1: 文字起こし ──────────────────────────────────────────────────────────
 
+def _model_cached(model_size: str) -> bool:
+    """faster-whisper モデルがローカルにキャッシュ済みか確認する。"""
+    import glob
+    import os
+    cache = os.path.expanduser("~/.cache/huggingface/hub")
+    pattern = f"{cache}/models--Systran--faster-whisper-{model_size}"
+    return bool(glob.glob(pattern))
+
+
 def _do_transcribe(audio_path, model_size, language):
     if audio_path is None:
         raise gr.Error("音声ファイルをアップロードしてください。")
+
+    use_mlx = _SETTINGS.platform.value == "mac"
+    if use_mlx:
+        yield [], "⏳ モデルを読み込み中..."
+    elif not _model_cached(model_size):
+        yield [], f"⬇️ faster-whisper/{model_size} モデルをダウンロード中（初回のみ）..."
+    else:
+        yield [], "⏳ モデルを読み込み中..."
 
     segments: list[dict] = []
     try:

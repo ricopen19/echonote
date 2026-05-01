@@ -16,6 +16,9 @@ dependencies = [
 echonote = "echonote.app:main"
 
 [project.optional-dependencies]
+mac = [
+    "mlx-whisper",
+]
 diarization = [
     "pyannote-audio>=3.0",
 ]
