@@ -1,14 +1,23 @@
 # Echonote セットアップスクリプト
-# 管理者権限の PowerShell で実行してください
 
 Set-StrictMode -Version Latest
-$ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-# ── 管理者権限チェック ────────────────────────────────────────────────────────
+# ── 管理者権限がなければ自動で昇格して再起動 ──────────────────────────────────
 if (-not ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
-    [Security.Principal.WindowsBuiltInRole]::Administrator)) {
-    Write-Error "管理者権限で実行してください。PowerShell を右クリック → 管理者として実行"
+        [Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    Write-Host "管理者権限で再起動します..." -ForegroundColor Yellow
+    Start-Process powershell -ArgumentList "-ExecutionPolicy Bypass -File `"$PSCommandPath`"" -Verb RunAs
+    exit
+}
+
+# ── エラー時もウィンドウを閉じない ────────────────────────────────────────────
+trap {
+    Write-Host ""
+    Write-Host "エラーが発生しました:" -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Red
+    Write-Host ""
+    Read-Host "Enter キーを押すと終了します"
     exit 1
 }
 
@@ -22,16 +31,15 @@ function Install-WingetPackage {
     param([string]$Id, [string]$Name)
     Write-Host ""
     Write-Host "[$Name] インストール中..." -ForegroundColor Cyan
-    $result = winget install --id $Id --silent --accept-source-agreements --accept-package-agreements 2>&1
+    winget install --id $Id --silent --accept-source-agreements --accept-package-agreements 2>&1 | Out-Null
     if ($LASTEXITCODE -eq 0 -or $LASTEXITCODE -eq -1978335189) {
-        # -1978335189 = すでにインストール済み
         Write-Host "[$Name] OK" -ForegroundColor Green
     } else {
-        Write-Warning "[$Name] インストールに問題がありましたが続行します（既存インストールがある場合は無視してください）"
+        Write-Host "[$Name] スキップ（インストール済みの可能性があります）" -ForegroundColor Yellow
     }
 }
 
-# ── スクリプトのあるディレクトリの親（echonoteルート）に移動 ──────────────────
+# ── 作業ディレクトリをechonoteルートに設定 ────────────────────────────────────
 $rootDir = Split-Path $PSScriptRoot -Parent
 Set-Location $rootDir
 Write-Host "作業ディレクトリ: $rootDir" -ForegroundColor Gray
@@ -56,26 +64,20 @@ Write-Host "========================================" -ForegroundColor Yellow
 Refresh-Path
 
 # ffmpeg が winget でPATHに入らなかった場合の補完
-$ffmpegPaths = @(
-    "C:\Program Files\ffmpeg\bin",
-    "C:\ffmpeg\bin"
-)
-foreach ($p in $ffmpegPaths) {
+foreach ($p in @("C:\Program Files\ffmpeg\bin", "C:\ffmpeg\bin")) {
     if ((Test-Path $p) -and ($env:PATH -notlike "*ffmpeg*")) {
         $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
         [Environment]::SetEnvironmentVariable("Path", $machinePath + ";" + $p, "Machine")
         $env:PATH += ";" + $p
         Write-Host "ffmpeg PATH を追加しました: $p" -ForegroundColor Green
-        break
     }
 }
 
-# 確認
 foreach ($cmd in @("python", "ffmpeg", "ollama")) {
     if (Get-Command $cmd -ErrorAction SilentlyContinue) {
         Write-Host "$cmd : OK" -ForegroundColor Green
     } else {
-        Write-Warning "$cmd : 見つかりません（インストール後に再起動が必要な場合があります）"
+        Write-Host "$cmd : 見つかりません（セットアップ後に再起動してください）" -ForegroundColor Yellow
     }
 }
 
@@ -106,7 +108,7 @@ if ($answer -match "^[yY]$") {
     ollama pull qwen3:4b-q4_K_M
     Write-Host "モデル : OK" -ForegroundColor Green
 } else {
-    Write-Host "スキップしました。後でターミナルから 'ollama pull qwen3:4b-q4_K_M' を実行してください。" -ForegroundColor Yellow
+    Write-Host "スキップしました。後で 'ollama pull qwen3:4b-q4_K_M' を実行してください。" -ForegroundColor Yellow
 }
 
 # ── 完了 ──────────────────────────────────────────────────────────────────────
@@ -115,8 +117,6 @@ Write-Host "========================================" -ForegroundColor Green
 Write-Host " セットアップ完了！" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "以降は start.bat をダブルクリックするだけで起動できます。" -ForegroundColor White
-Write-Host ""
-Write-Host "※ PATH の変更を完全に反映するには、一度 PC を再起動することをおすすめします。" -ForegroundColor Gray
+Write-Host "PC を再起動してから start.bat をダブルクリックして起動してください。" -ForegroundColor White
 Write-Host ""
 Read-Host "Enter キーを押すと終了します"
