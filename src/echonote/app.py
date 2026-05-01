@@ -30,24 +30,22 @@ def _build_prompt(template_text: str, segments: list[cfg.Settings]) -> str:
 
 # ── Tab 1: 文字起こし ──────────────────────────────────────────────────────────
 
-def _do_transcribe(audio_path, model_size, language, progress=gr.Progress()):  # noqa: B008
+def _do_transcribe(audio_path, model_size, language):
     if audio_path is None:
         raise gr.Error("音声ファイルをアップロードしてください。")
 
-    progress(0, desc="転写を開始します...")
+    segments: list[dict] = []
     try:
-        segments = transcriber.transcribe(
+        for seg in transcriber.transcribe_stream(
             audio_path,
             model_size=model_size,
             language=language,
             settings=_SETTINGS,
-        )
+        ):
+            segments.append(seg)
+            yield segments, exporter.segments_to_transcript(segments)
     except RuntimeError as e:
         raise gr.Error(str(e)) from e
-
-    progress(1, desc="完了")
-    transcript_text = exporter.segments_to_transcript(segments)
-    return segments, transcript_text
 
 
 # ── Tab 2: 記録生成 ───────────────────────────────────────────────────────────

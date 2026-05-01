@@ -24,28 +24,29 @@ def _check_ffmpeg() -> None:
         )
 
 
-def _transcribe_faster_whisper(
+def _stream_faster_whisper(
     audio_path: str,
     model_size: str,
     language: str,
     device: str = "cpu",
     compute_type: str = "int8",
-) -> list[Segment]:
+):
     from faster_whisper import WhisperModel
 
     model = WhisperModel(model_size, device=device, compute_type=compute_type)
     try:
         segments, _ = model.transcribe(audio_path, language=language, beam_size=5)
-        return [{"start": s.start, "end": s.end, "text": s.text.strip()} for s in segments]
+        for s in segments:
+            yield {"start": s.start, "end": s.end, "text": s.text.strip()}
     finally:
         del model
 
 
-def _transcribe_mlx_whisper(
+def _stream_mlx_whisper(
     audio_path: str,
     model_size: str,
     language: str,
-) -> list[Segment]:
+):
     import mlx_whisper
 
     _MODEL_MAP = {
@@ -58,19 +59,18 @@ def _transcribe_mlx_whisper(
     }
     repo = _MODEL_MAP.get(model_size, f"mlx-community/whisper-{model_size}")
     result = mlx_whisper.transcribe(audio_path, path_or_hf_repo=repo, language=language)
-    return [
-        {"start": s["start"], "end": s["end"], "text": s["text"].strip()}
-        for s in result["segments"]
-    ]
+    # mlx-whisper はバッチ処理なのでまとめて yield
+    for s in result["segments"]:
+        yield {"start": s["start"], "end": s["end"], "text": s["text"].strip()}
 
 
-def transcribe(
+def transcribe_stream(
     audio_path: str | Path,
     model_size: str,
     language: str,
     settings: Settings | None = None,
-) -> list[Segment]:
-    """音声ファイルを転写して [{start, end, text}] を返す。"""
+):
+    """音声ファイルを転写し、セグメントを順次 yield する。"""
     _check_ffmpeg()
     audio_path = str(audio_path)
 
@@ -81,9 +81,19 @@ def transcribe(
 
     if use_mlx:
         try:
-            return _transcribe_mlx_whisper(audio_path, model_size, language)
+            yield from _stream_mlx_whisper(audio_path, model_size, language)
+            return
         except ImportError:
             pass  # mlx-whisper 未インストール → faster-whisper にフォールバック
 
-    # Windows / Linux、または Mac で mlx-whisper が使えない場合
-    return _transcribe_faster_whisper(audio_path, model_size, language)
+    yield from _stream_faster_whisper(audio_path, model_size, language)
+
+
+def transcribe(
+    audio_path: str | Path,
+    model_size: str,
+    language: str,
+    settings: Settings | None = None,
+) -> list[Segment]:
+    """音声ファイルを転写して [{start, end, text}] を返す。"""
+    return list(transcribe_stream(audio_path, model_size, language, settings))
