@@ -15,9 +15,9 @@
 
 - [x] A1: Markdown 整形出力 — `src/echonote/exporter.py`
 - [x] A2: 会議議事録プロンプトテンプレート — `src/echonote/prompts/meeting.txt`
-- [ ] A3: transcriber ユニットテスト（faster-whisper モック） — `tests/test_transcriber.py`
-- [ ] A4: llm クライアントのユニットテスト（requests モック） — `tests/test_llm.py`
-- [ ] A5: exporter のユニットテスト — `tests/test_exporter.py`
+- [x] A3: transcriber ユニットテスト（faster-whisper モック） — `tests/test_transcriber.py`
+- [x] A4: llm クライアントのユニットテスト（requests モック） — `tests/test_llm.py`
+- [x] A5: exporter のユニットテスト — `tests/test_exporter.py`
 
 ### 設計上の決定事項（Phase 1）
 
