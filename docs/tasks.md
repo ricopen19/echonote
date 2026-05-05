@@ -19,30 +19,15 @@
 - [x] A4: llm クライアントのユニットテスト（requests モック） — `tests/test_llm.py`
 - [x] A5: exporter のユニットテスト — `tests/test_exporter.py`
 
-### 設計上の決定事項（Phase 1）
-
-- LLM クライアント: `requests`（pyproject.toml 既存依存）
-- HWティア検出: `psutil` で総RAM取得 → 8GB未満=Light / 12GB未満=Standard / それ以上=Performance
-- LLM 生成後に `keep_alive: 0` でモデルをアンロード（RAM解放）
-- 話者分離（diarizer.py）: Phase 2 以降
-- Word 出力（.docx）: Phase 2 以降
-
-### Windows 検証結果（2026-05-01）
-
-- i5-8500 16GB: `small` で実再生時間の半分程度、`medium` で安定品質
-- `medium` + 長時間音声で OOM クラッシュ → `keep_alive: 0` で改善
-- 8GB 環境では `small` のみ実用的（`medium` は OS 込みで限界）
-- setup.ps1 は UTF-8 日本語が Shift-JIS 誤読みされるため英語のみで作成
-
 ---
 
 ## Phase 2（話者分離・出力拡充）
 
-- [ ] P2-1: pyannote-audio 話者分離ラッパー（device自動・互換性パッチ込み）
-- [ ] P2-2: 話者ラベル手動編集 UI
-- [ ] P2-3: Word (.docx) 出力対応
+- [x] P2-1: pyannote-audio 話者分離ラッパー（device自動・互換性パッチ込み）
+- [x] P2-2: 話者ラベル手動編集 UI
+- [x] P2-3: Word (.docx) 出力対応
 - [ ] P2-4: 面接・授業プロンプトテンプレート追加
-- [ ] P2-5: Mac mlx-whisper 転写経路の統合
+- [x] P2-5: Mac mlx-whisper 転写経路の統合
 
 ---
 
@@ -55,3 +40,11 @@
 - [ ] P3-5: チームメンバーへの展開
 - [ ] P3-6: Playwright によるブラウザ自動テスト（`example-skills:webapp-testing` で設定）
 - [ ] P3-7: 長時間音声のチャンク分割（OOM 対策）
+
+---
+
+## Phase 4（トランスクリプト UX）
+
+- [ ] P4-1: 話者フィルタ — 指定した話者の発言のみ抽出・表示
+- [ ] P4-2: ワード検索 — 文字起こし結果内のキーワード検索とハイライト
+- [ ] P4-3: 音声プレーヤー連動 — 再生中のセグメントをリアルタイムでハイライト（YouTube 字幕風）
