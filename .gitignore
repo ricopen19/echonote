@@ -35,8 +35,11 @@ htmlcov/
 output/
 *.docx
 *.md
-!docs/*.md
 !README.md
+
+# Docs / Tests (not needed for end users)
+docs/
+tests/
 
 # uv
 uv.lock
