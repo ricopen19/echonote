@@ -27,6 +27,16 @@ _mlx_model_cache: dict = {}
 _SPLIT_CHUNK_MINUTES = 10
 _SPLIT_THRESHOLD_SEC = _SPLIT_CHUNK_MINUTES * 60
 
+_BEAM_SIZE = 3
+
+
+def _get_cpu_threads() -> int:
+    """CPU スレッド数を返す。ECHONOTE_CPU_THREADS 環境変数でオーバーライド可能。"""
+    env = os.environ.get("ECHONOTE_CPU_THREADS", "")
+    if env.isdigit() and int(env) > 0:
+        return int(env)
+    return min(4, os.cpu_count() or 4)
+
 
 def _check_ffmpeg() -> None:
     if shutil.which("ffmpeg") is None:
@@ -101,7 +111,7 @@ def _stream_faster_whisper(
     duration = _get_audio_duration(audio_path)
     use_chunks = duration > _SPLIT_THRESHOLD_SEC
 
-    model = WhisperModel(model_size, device=device, compute_type=compute_type)
+    model = WhisperModel(model_size, device=device, compute_type=compute_type, cpu_threads=_get_cpu_threads())
     try:
         if use_chunks:
             with tempfile.TemporaryDirectory() as tmp_dir:
@@ -116,7 +126,7 @@ def _stream_faster_whisper(
                         f"（{offset_sec / 60:.0f}〜{end_min:.0f} 分）処理中",
                         flush=True,
                     )
-                    segs, _ = model.transcribe(chunk_path, language=language, beam_size=5)
+                    segs, _ = model.transcribe(chunk_path, language=language, beam_size=_BEAM_SIZE)
                     for s in segs:
                         text = s.text.strip()
                         if text:
@@ -128,7 +138,7 @@ def _stream_faster_whisper(
         else:
             if on_chunk:
                 on_chunk(0, 1, 0.0, duration / 60)
-            segments, _ = model.transcribe(audio_path, language=language, beam_size=5)
+            segments, _ = model.transcribe(audio_path, language=language, beam_size=_BEAM_SIZE)
             for s in segments:
                 yield {"start": s.start, "end": s.end, "text": s.text.strip()}
     finally:
