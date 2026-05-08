@@ -19,6 +19,21 @@ class LLMError(Exception):
     """LLM からエラーレスポンスが返った場合。"""
 
 
+def try_unload(base_url: str, model: str) -> None:
+    """Ollama のモデルをアンロードする。失敗・非 Ollama サーバーは無視。"""
+    try:
+        host = base_url.rstrip("/")
+        if host.endswith("/v1"):
+            host = host[:-3]
+        requests.post(
+            f"{host}/api/generate",
+            json={"model": model, "keep_alive": 0},
+            timeout=_CONNECT_TIMEOUT,
+        )
+    except Exception:
+        pass
+
+
 def check_endpoint(base_url: str) -> bool:
     """エンドポイントに到達できるか確認する。"""
     try:
