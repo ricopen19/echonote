@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import traceback
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -93,6 +94,7 @@ def _stream_faster_whisper(
     language: str,
     device: str = "cpu",
     compute_type: str = "int8",
+    on_chunk: Callable[[int, int, float, float], None] | None = None,
 ):
     from faster_whisper import WhisperModel
 
@@ -107,6 +109,8 @@ def _stream_faster_whisper(
                 total = len(chunks)
                 for i, (chunk_path, offset_sec) in enumerate(chunks):
                     end_min = min(offset_sec + _SPLIT_CHUNK_MINUTES * 60, duration) / 60
+                    if on_chunk:
+                        on_chunk(i, total, offset_sec / 60, end_min)
                     print(
                         f"[transcriber] チャンク {i + 1}/{total}"
                         f"（{offset_sec / 60:.0f}〜{end_min:.0f} 分）処理中",
@@ -122,6 +126,8 @@ def _stream_faster_whisper(
                                 "text": text,
                             }
         else:
+            if on_chunk:
+                on_chunk(0, 1, 0.0, duration / 60)
             segments, _ = model.transcribe(audio_path, language=language, beam_size=5)
             for s in segments:
                 yield {"start": s.start, "end": s.end, "text": s.text.strip()}
@@ -195,8 +201,12 @@ def transcribe_stream(
     model_size: str,
     language: str,
     settings: Settings | None = None,
+    on_chunk: Callable[[int, int, float, float], None] | None = None,
 ):
-    """音声ファイルを転写し、セグメントを順次 yield する。"""
+    """音声ファイルを転写し、セグメントを順次 yield する。
+
+    on_chunk(idx, total, start_min, end_min): チャンク処理開始時に呼ばれるコールバック。
+    """
     _check_ffmpeg()
     audio_path = str(audio_path)
 
@@ -223,7 +233,7 @@ def transcribe_stream(
                 traceback.print_exc()
                 print(f"[transcriber] mlx-whisper 失敗 ({type(e).__name__}) → faster-whisper FB", flush=True)
 
-    yield from _stream_faster_whisper(audio_path, model_size, language)
+    yield from _stream_faster_whisper(audio_path, model_size, language, on_chunk=on_chunk)
 
 
 def transcribe(

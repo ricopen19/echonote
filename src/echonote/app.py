@@ -47,11 +47,24 @@ def _do_transcribe(audio_path, model_size, language, do_diarize):
 
     use_mlx = _SETTINGS.platform.value == "mac"
     if use_mlx:
-        yield [], "⏳ モデルを読み込み中...", gr.update(visible=False), gr.update(visible=False)
+        init_status = "⏳ モデルを読み込み中..."
     elif not _model_cached(model_size):
-        yield [], f"⬇️ faster-whisper/{model_size} モデルをダウンロード中（初回のみ）...", gr.update(visible=False), gr.update(visible=False)
+        init_status = f"⬇️ faster-whisper/{model_size} モデルをダウンロード中（初回のみ）..."
     else:
-        yield [], "⏳ モデルを読み込み中...", gr.update(visible=False), gr.update(visible=False)
+        init_status = "⏳ モデルを読み込み中..."
+
+    yield [], "", gr.update(visible=False), gr.update(visible=False), init_status
+
+    status = {"text": "🔄 文字起こし中..."}
+
+    def on_chunk(idx: int, total: int, start_min: float, end_min: float) -> None:
+        if total == 1:
+            status["text"] = "🔄 文字起こし中..."
+        else:
+            status["text"] = (
+                f"🔄 チャンク {idx + 1} / {total} 処理中"
+                f"（{start_min:.0f}〜{end_min:.0f} 分）"
+            )
 
     segments: list[dict] = []
     try:
@@ -60,18 +73,28 @@ def _do_transcribe(audio_path, model_size, language, do_diarize):
             model_size=model_size,
             language=language,
             settings=_SETTINGS,
+            on_chunk=on_chunk,
         ):
             segments.append(seg)
-            yield segments, exporter.segments_to_transcript(segments), gr.update(visible=False), gr.update(visible=False)
+            yield (
+                segments,
+                exporter.segments_to_transcript(segments),
+                gr.update(visible=False),
+                gr.update(visible=False),
+                status["text"],
+            )
     except Exception as e:
         import traceback
         traceback.print_exc()
         raise gr.Error(f"{type(e).__name__}: {e}") from e
 
     if not do_diarize:
+        done = f"✅ 文字起こし完了（{len(segments)} セグメント）"
+        yield segments, exporter.segments_to_transcript(segments), gr.update(visible=False), gr.update(visible=False), done
         return
 
-    yield segments, "⏳ 話者分離中（数分かかります）...", gr.update(visible=False), gr.update(visible=False)
+    diarize_status = "⏳ 話者分離中（数分かかります）..."
+    yield segments, exporter.segments_to_transcript(segments), gr.update(visible=False), gr.update(visible=False), diarize_status
     try:
         segments = diarizer.diarize(audio_path, _SETTINGS.effective_hf_token(), segments)
     except (ValueError, ImportError) as e:
@@ -83,11 +106,13 @@ def _do_transcribe(audio_path, model_size, language, do_diarize):
 
     speakers = sorted({s.get("speaker", "") for s in segments if s.get("speaker")})
     df_data = [[spk, ""] for spk in speakers]
+    done = f"✅ 文字起こし + 話者分離完了（{len(segments)} セグメント）"
     yield (
         segments,
         exporter.segments_to_transcript(segments),
         gr.update(value=df_data, visible=True),
         gr.update(visible=True),
+        done,
     )
 
 
@@ -187,6 +212,7 @@ def build_ui() -> gr.Blocks:
                         )
 
                 transcribe_btn = gr.Button("▶ 文字起こし開始", variant="primary")
+                status_md = gr.Markdown("")
                 transcript_box = gr.Textbox(
                     label="文字起こし結果",
                     lines=15,
@@ -206,7 +232,7 @@ def build_ui() -> gr.Blocks:
                 transcribe_btn.click(
                     fn=_do_transcribe,
                     inputs=[audio_input, model_dd, lang_dd, diarize_chk],
-                    outputs=[segments_state, transcript_box, speakers_df, apply_speakers_btn],
+                    outputs=[segments_state, transcript_box, speakers_df, apply_speakers_btn, status_md],
                 )
                 apply_speakers_btn.click(
                     fn=_do_apply_speakers,
