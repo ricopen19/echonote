@@ -10,6 +10,7 @@ dependencies = [
     "psutil>=5.9",
     "python-docx",
     "requests",
+    "setuptools>=82.0.0",
 ]
 
 [project.scripts]
@@ -20,6 +21,7 @@ mac = [
     "mlx-whisper",
 ]
 diarization = [
+    "resemblyzer",
     "pyannote-audio>=3.0",
 ]
 
