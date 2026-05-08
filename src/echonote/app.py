@@ -39,10 +39,11 @@ def _model_cached(model_size: str) -> bool:
     return bool(glob.glob(pattern))
 
 
-def _do_transcribe(audio_path, model_size, language, do_diarize):
+def _do_transcribe(audio_path, model_size, language, do_diarize, chunk_minutes_str):
     if audio_path is None:
         raise gr.Error("音声ファイルをアップロードしてください。")
 
+    chunk_minutes = int(chunk_minutes_str.replace("分", ""))
     llm.try_unload(_SETTINGS.effective_llm_url(), _SETTINGS.effective_llm_model())
 
     use_mlx = _SETTINGS.platform.value == "mac"
@@ -74,6 +75,7 @@ def _do_transcribe(audio_path, model_size, language, do_diarize):
             language=language,
             settings=_SETTINGS,
             on_chunk=on_chunk,
+            chunk_minutes=chunk_minutes,
         ):
             segments.append(seg)
             yield (
@@ -210,6 +212,11 @@ def build_ui() -> gr.Blocks:
                             label="話者分離を実行（HF トークン必須）",
                             value=False,
                         )
+                        chunk_dd = gr.Dropdown(
+                            label="チャンク分割（長音声OOM対策）",
+                            choices=["5分", "10分"],
+                            value="5分",
+                        )
 
                 transcribe_btn = gr.Button("▶ 文字起こし開始", variant="primary")
                 status_md = gr.Markdown("")
@@ -231,7 +238,7 @@ def build_ui() -> gr.Blocks:
 
                 transcribe_btn.click(
                     fn=_do_transcribe,
-                    inputs=[audio_input, model_dd, lang_dd, diarize_chk],
+                    inputs=[audio_input, model_dd, lang_dd, diarize_chk, chunk_dd],
                     outputs=[segments_state, transcript_box, speakers_df, apply_speakers_btn, status_md],
                 )
                 apply_speakers_btn.click(

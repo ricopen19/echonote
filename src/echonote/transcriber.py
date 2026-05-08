@@ -8,10 +8,13 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import traceback
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+import psutil
 
 if TYPE_CHECKING:
     from echonote.config import Settings
@@ -24,18 +27,20 @@ _SAMPLE_RATE = 16_000
 _CHUNK_SECONDS = 30
 _mlx_model_cache: dict = {}
 
-_SPLIT_CHUNK_MINUTES = 10
-_SPLIT_THRESHOLD_SEC = _SPLIT_CHUNK_MINUTES * 60
-
 _BEAM_SIZE = 3
+_INTER_CHUNK_SLEEP_SEC = 5
 
 
 def _get_cpu_threads() -> int:
-    """CPU スレッド数を返す。ECHONOTE_CPU_THREADS 環境変数でオーバーライド可能。"""
+    """CPU スレッド数を返す。ECHONOTE_CPU_THREADS 環境変数でオーバーライド可能。
+
+    デフォルト: 物理コア数 // 2（HT/SMT を除いた実コアの半分）。
+    """
     env = os.environ.get("ECHONOTE_CPU_THREADS", "")
     if env.isdigit() and int(env) > 0:
         return int(env)
-    return min(4, os.cpu_count() or 4)
+    physical = psutil.cpu_count(logical=False) or 2
+    return max(1, physical // 2)
 
 
 def _check_ffmpeg() -> None:
@@ -105,20 +110,21 @@ def _stream_faster_whisper(
     device: str = "cpu",
     compute_type: str = "int8",
     on_chunk: Callable[[int, int, float, float], None] | None = None,
+    chunk_minutes: int = 5,
 ):
     from faster_whisper import WhisperModel
 
     duration = _get_audio_duration(audio_path)
-    use_chunks = duration > _SPLIT_THRESHOLD_SEC
+    use_chunks = duration > chunk_minutes * 60
 
     model = WhisperModel(model_size, device=device, compute_type=compute_type, cpu_threads=_get_cpu_threads())
     try:
         if use_chunks:
             with tempfile.TemporaryDirectory() as tmp_dir:
-                chunks = _split_audio_chunks(audio_path, _SPLIT_CHUNK_MINUTES * 60, tmp_dir)
+                chunks = _split_audio_chunks(audio_path, chunk_minutes * 60, tmp_dir)
                 total = len(chunks)
                 for i, (chunk_path, offset_sec) in enumerate(chunks):
-                    end_min = min(offset_sec + _SPLIT_CHUNK_MINUTES * 60, duration) / 60
+                    end_min = min(offset_sec + chunk_minutes * 60, duration) / 60
                     if on_chunk:
                         on_chunk(i, total, offset_sec / 60, end_min)
                     print(
@@ -135,6 +141,9 @@ def _stream_faster_whisper(
                                 "end": s.end + offset_sec,
                                 "text": text,
                             }
+                    if i < total - 1:
+                        print(f"[transcriber] {_INTER_CHUNK_SLEEP_SEC}秒冷却中...", flush=True)
+                        time.sleep(_INTER_CHUNK_SLEEP_SEC)
         else:
             if on_chunk:
                 on_chunk(0, 1, 0.0, duration / 60)
@@ -212,10 +221,12 @@ def transcribe_stream(
     language: str,
     settings: Settings | None = None,
     on_chunk: Callable[[int, int, float, float], None] | None = None,
+    chunk_minutes: int = 5,
 ):
     """音声ファイルを転写し、セグメントを順次 yield する。
 
     on_chunk(idx, total, start_min, end_min): チャンク処理開始時に呼ばれるコールバック。
+    chunk_minutes: チャンク分割の長さ（分）。この長さを超える音声を自動分割する。
     """
     _check_ffmpeg()
     audio_path = str(audio_path)
@@ -243,7 +254,7 @@ def transcribe_stream(
                 traceback.print_exc()
                 print(f"[transcriber] mlx-whisper 失敗 ({type(e).__name__}) → faster-whisper FB", flush=True)
 
-    yield from _stream_faster_whisper(audio_path, model_size, language, on_chunk=on_chunk)
+    yield from _stream_faster_whisper(audio_path, model_size, language, on_chunk=on_chunk, chunk_minutes=chunk_minutes)
 
 
 def transcribe(
