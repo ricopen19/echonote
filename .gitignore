@@ -41,5 +41,8 @@ output/
 docs/
 tests/
 
+# Release archives
+echonote-v*.zip
+
 # uv
 uv.lock
