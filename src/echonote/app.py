@@ -20,27 +20,124 @@ def _fmt_sec(sec: int) -> str:
     return f"{h}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
 
 
-def _on_audio_load(audio_path):
+def _on_audio_upload(audio_path):
     if audio_path is None:
-        return 0.0, gr.update(maximum=7200, value=0), gr.update(maximum=7200, value=7200), ""
+        return 0.0, ""
     dur = trimmer.get_duration(audio_path)
-    dur_int = max(1, int(dur))
-    return (
-        dur,
-        gr.update(maximum=dur_int, value=0),
-        gr.update(maximum=dur_int, value=dur_int),
-        f"全体を転写（{_fmt_sec(dur_int)}）",
-    )
+    real_path = str(Path(audio_path).resolve())
+    return dur, f"/file={real_path}"
 
 
 def _update_trim_info(start, end, duration):
     if duration <= 0:
         return ""
-    dur_int = int(duration)
-    s, e = int(start), int(end)
-    if s <= 0 and e >= dur_int - 1:
-        return f"全体を転写（{_fmt_sec(dur_int)}）"
-    return f"✂️ **{_fmt_sec(s)} 〜 {_fmt_sec(e)}**（{_fmt_sec(max(0, e - s))} を転写）"
+    s, e, dur = float(start or 0), float(end or 0), float(duration)
+    if s <= 0.5 and e >= dur - 0.5:
+        return f"全体を転写（{_fmt_sec(int(dur))}）"
+    return f"✂️ **{_fmt_sec(int(s))} 〜 {_fmt_sec(int(e))}**（{_fmt_sec(max(0, int(e - s)))} を転写）"
+
+
+_WAVEFORM_HTML = """
+<div id="echonote-player" style="background:#1e1e2e;border-radius:8px;padding:16px;margin:4px 0;user-select:none;">
+  <div id="echonote-waveform" style="min-height:100px;cursor:col-resize;"></div>
+  <div style="display:flex;align-items:center;gap:12px;margin-top:10px;">
+    <button id="echonote-play-btn"
+            onclick="if(window.echonoteWS)window.echonoteWS.playPause()"
+            style="background:#4a9eff;color:#fff;border:none;border-radius:50%;width:40px;height:40px;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">▶</button>
+    <span id="echonote-time" style="font-family:monospace;color:#aaa;font-size:13px;flex-shrink:0;">0:00 / 0:00</span>
+    <span id="echonote-region-info" style="margin-left:auto;color:#4a9eff;font-size:13px;font-weight:500;"></span>
+  </div>
+  <p style="color:#555;font-size:11px;margin:8px 0 0;text-align:center;">波形の端をドラッグしてトリム範囲を選択 · クリックで再生位置を移動</p>
+</div>
+"""
+
+_WAVESURFER_JS = """
+async function() {
+    const { default: WaveSurfer } = await import(
+        'https://cdn.jsdelivr.net/npm/wavesurfer.js@7/dist/wavesurfer.esm.js'
+    );
+    const { default: RegionsPlugin } = await import(
+        'https://cdn.jsdelivr.net/npm/wavesurfer.js@7/dist/plugins/regions.esm.js'
+    );
+
+    function fmtSec(s) {
+        s = Math.max(0, s);
+        const m = Math.floor(s / 60), sec = Math.floor(s % 60);
+        return `${m}:${sec.toString().padStart(2, '0')}`;
+    }
+
+    function setGradioNum(elemId, value) {
+        const el = document.getElementById(elemId);
+        if (!el) return;
+        const input = el.querySelector('input[type="number"]');
+        if (!input) return;
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+        setter.call(input, String(value));
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    function initPlayer(url) {
+        if (window.echonoteWS) { window.echonoteWS.destroy(); window.echonoteWS = null; }
+        const container = document.getElementById('echonote-waveform');
+        if (!container) return;
+        container.innerHTML = '';
+
+        const regions = RegionsPlugin.create();
+        const ws = window.echonoteWS = WaveSurfer.create({
+            container,
+            waveColor: '#4a9eff',
+            progressColor: '#1a5eb5',
+            height: 100,
+            plugins: [regions],
+        });
+        ws.load(url);
+
+        ws.on('ready', () => {
+            const dur = ws.getDuration();
+            regions.addRegion({
+                start: 0, end: dur,
+                color: 'rgba(74,158,255,0.2)',
+                drag: true, resize: true,
+            });
+            const timeEl = document.getElementById('echonote-time');
+            if (timeEl) timeEl.textContent = `0:00 / ${fmtSec(dur)}`;
+            const infoEl = document.getElementById('echonote-region-info');
+            if (infoEl) infoEl.textContent = '';
+            setGradioNum('echonote-trim-start', 0);
+            setGradioNum('echonote-trim-end', dur);
+        });
+
+        ws.on('timeupdate', (t) => {
+            const timeEl = document.getElementById('echonote-time');
+            if (timeEl) timeEl.textContent = `${fmtSec(t)} / ${fmtSec(ws.getDuration())}`;
+            const btn = document.getElementById('echonote-play-btn');
+            if (btn) btn.textContent = ws.isPlaying() ? '⏸' : '▶';
+        });
+
+        ws.on('finish', () => {
+            const btn = document.getElementById('echonote-play-btn');
+            if (btn) btn.textContent = '▶';
+        });
+
+        regions.on('region-updated', (region) => {
+            setGradioNum('echonote-trim-start', region.start);
+            setGradioNum('echonote-trim-end', region.end);
+            const infoEl = document.getElementById('echonote-region-info');
+            if (infoEl) infoEl.textContent = `✂️ ${fmtSec(region.start)} 〜 ${fmtSec(region.end)}`;
+        });
+    }
+
+    let lastUrl = '';
+    setInterval(() => {
+        const wrapper = document.getElementById('echonote-audio-url');
+        if (!wrapper) return;
+        const ta = wrapper.querySelector('textarea');
+        const url = (ta ? ta.value : '').trim();
+        if (url && url !== lastUrl) { lastUrl = url; initPlayer(url); }
+    }, 500);
+}
+"""
 
 TEMPLATE_NAMES = {
     "会議議事録": "meeting",
@@ -227,19 +324,24 @@ def build_ui() -> gr.Blocks:
 
                 with gr.Row():
                     with gr.Column(scale=2):
-                        audio_input = gr.Audio(
+                        audio_input = gr.File(
                             label="音声ファイル",
+                            file_types=["audio"],
                             type="filepath",
                         )
-                        with gr.Row():
-                            trim_start_sl = gr.Slider(
-                                label="トリム開始（秒）",
-                                minimum=0, maximum=7200, value=0, step=1,
-                            )
-                            trim_end_sl = gr.Slider(
-                                label="トリム終了（秒）",
-                                minimum=0, maximum=7200, value=7200, step=1,
-                            )
+                        gr.HTML(_WAVEFORM_HTML)
+                        # JS との通信用 hidden コンポーネント
+                        audio_url_txt = gr.Textbox(
+                            visible=False, elem_id="echonote-audio-url",
+                        )
+                        trim_start_num = gr.Number(
+                            value=0.0, visible=False,
+                            elem_id="echonote-trim-start", label="trim_start",
+                        )
+                        trim_end_num = gr.Number(
+                            value=0.0, visible=False,
+                            elem_id="echonote-trim-end", label="trim_end",
+                        )
                         trim_info_md = gr.Markdown("")
                     with gr.Column(scale=1):
                         model_dd = gr.Dropdown(
@@ -281,23 +383,23 @@ def build_ui() -> gr.Blocks:
                 apply_speakers_btn = gr.Button("話者名を適用", visible=False)
 
                 audio_input.change(
-                    fn=_on_audio_load,
+                    fn=_on_audio_upload,
                     inputs=[audio_input],
-                    outputs=[duration_state, trim_start_sl, trim_end_sl, trim_info_md],
+                    outputs=[duration_state, audio_url_txt],
                 )
-                trim_start_sl.change(
+                trim_start_num.change(
                     fn=_update_trim_info,
-                    inputs=[trim_start_sl, trim_end_sl, duration_state],
+                    inputs=[trim_start_num, trim_end_num, duration_state],
                     outputs=trim_info_md,
                 )
-                trim_end_sl.change(
+                trim_end_num.change(
                     fn=_update_trim_info,
-                    inputs=[trim_start_sl, trim_end_sl, duration_state],
+                    inputs=[trim_start_num, trim_end_num, duration_state],
                     outputs=trim_info_md,
                 )
                 transcribe_btn.click(
                     fn=_do_transcribe,
-                    inputs=[audio_input, model_dd, lang_dd, diarize_chk, chunk_dd, trim_start_sl, trim_end_sl],
+                    inputs=[audio_input, model_dd, lang_dd, diarize_chk, chunk_dd, trim_start_num, trim_end_num],
                     outputs=[segments_state, transcript_box, speakers_df, apply_speakers_btn, status_md],
                 )
                 apply_speakers_btn.click(
@@ -442,7 +544,7 @@ def build_ui() -> gr.Blocks:
 
 def main():
     demo = build_ui()
-    demo.launch()
+    demo.launch(js=_WAVESURFER_JS)
 
 
 if __name__ == "__main__":
