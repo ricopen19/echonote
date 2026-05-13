@@ -374,6 +374,10 @@ def build_ui() -> gr.Blocks:
                     lines=15,
                     interactive=False,
                     placeholder="文字起こし結果がここに表示されます",
+                    elem_id="echonote-transcript",
+                )
+                copy_no_ts_btn = gr.Button(
+                    "📋 タイムスタンプなしでコピー", size="sm", variant="secondary",
                 )
 
                 speakers_df = gr.Dataframe(
@@ -409,6 +413,18 @@ def build_ui() -> gr.Blocks:
                     fn=_do_apply_speakers,
                     inputs=[segments_state, speakers_df],
                     outputs=[segments_state, transcript_box],
+                )
+                copy_no_ts_btn.click(
+                    fn=None,
+                    js="""() => {
+                        const ta = document.querySelector('#echonote-transcript textarea');
+                        if (!ta || !ta.value) return;
+                        const text = ta.value
+                            .split('\\n')
+                            .map(l => l.replace(/^\\[\\d+:\\d{2} - \\d+:\\d{2}\\] /, ''))
+                            .join('\\n');
+                        navigator.clipboard.writeText(text).catch(() => {});
+                    }""",
                 )
 
             # ── Tab 2 ──────────────────────────────────────────────────────
