@@ -8,10 +8,39 @@ from pathlib import Path
 import gradio as gr
 
 from echonote import config as cfg
-from echonote import diarizer, exporter, llm, transcriber
+from echonote import diarizer, exporter, llm, transcriber, trimmer
 
 _SETTINGS = cfg.load_settings()
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
+
+
+def _fmt_sec(sec: int) -> str:
+    m, s = divmod(sec, 60)
+    h, m = divmod(m, 60)
+    return f"{h}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
+
+
+def _on_audio_load(audio_path):
+    if audio_path is None:
+        return 0.0, gr.update(maximum=7200, value=0), gr.update(maximum=7200, value=7200), ""
+    dur = trimmer.get_duration(audio_path)
+    dur_int = max(1, int(dur))
+    return (
+        dur,
+        gr.update(maximum=dur_int, value=0),
+        gr.update(maximum=dur_int, value=dur_int),
+        f"全体を転写（{_fmt_sec(dur_int)}）",
+    )
+
+
+def _update_trim_info(start, end, duration):
+    if duration <= 0:
+        return ""
+    dur_int = int(duration)
+    s, e = int(start), int(end)
+    if s <= 0 and e >= dur_int - 1:
+        return f"全体を転写（{_fmt_sec(dur_int)}）"
+    return f"✂️ **{_fmt_sec(s)} 〜 {_fmt_sec(e)}**（{_fmt_sec(max(0, e - s))} を転写）"
 
 TEMPLATE_NAMES = {
     "会議議事録": "meeting",
@@ -39,9 +68,13 @@ def _model_cached(model_size: str) -> bool:
     return bool(glob.glob(pattern))
 
 
-def _do_transcribe(audio_path, model_size, language, do_diarize, chunk_minutes_str):
+def _do_transcribe(audio_path, model_size, language, do_diarize, chunk_minutes_str, trim_start, trim_end):
     if audio_path is None:
         raise gr.Error("音声ファイルをアップロードしてください。")
+
+    duration = trimmer.get_duration(audio_path)
+    if trim_start > 0 or (duration > 0 and trim_end < duration - 1):
+        audio_path = trimmer.trim(audio_path, trim_start, trim_end if trim_end > 0 else 0)
 
     chunk_minutes = int(chunk_minutes_str.replace("分", ""))
     llm.try_unload(_SETTINGS.effective_llm_url(), _SETTINGS.effective_llm_model())
@@ -190,13 +223,24 @@ def build_ui() -> gr.Blocks:
         with gr.Tabs():
             # ── Tab 1 ──────────────────────────────────────────────────────
             with gr.TabItem("📝 文字起こし"):
+                duration_state = gr.State(0.0)
+
                 with gr.Row():
                     with gr.Column(scale=2):
-                        audio_input = gr.File(
+                        audio_input = gr.Audio(
                             label="音声ファイル",
-                            file_types=["audio"],
                             type="filepath",
                         )
+                        with gr.Row():
+                            trim_start_sl = gr.Slider(
+                                label="トリム開始（秒）",
+                                minimum=0, maximum=7200, value=0, step=1,
+                            )
+                            trim_end_sl = gr.Slider(
+                                label="トリム終了（秒）",
+                                minimum=0, maximum=7200, value=7200, step=1,
+                            )
+                        trim_info_md = gr.Markdown("")
                     with gr.Column(scale=1):
                         model_dd = gr.Dropdown(
                             label="Whisper モデル",
@@ -236,9 +280,24 @@ def build_ui() -> gr.Blocks:
                 )
                 apply_speakers_btn = gr.Button("話者名を適用", visible=False)
 
+                audio_input.change(
+                    fn=_on_audio_load,
+                    inputs=[audio_input],
+                    outputs=[duration_state, trim_start_sl, trim_end_sl, trim_info_md],
+                )
+                trim_start_sl.change(
+                    fn=_update_trim_info,
+                    inputs=[trim_start_sl, trim_end_sl, duration_state],
+                    outputs=trim_info_md,
+                )
+                trim_end_sl.change(
+                    fn=_update_trim_info,
+                    inputs=[trim_start_sl, trim_end_sl, duration_state],
+                    outputs=trim_info_md,
+                )
                 transcribe_btn.click(
                     fn=_do_transcribe,
-                    inputs=[audio_input, model_dd, lang_dd, diarize_chk, chunk_dd],
+                    inputs=[audio_input, model_dd, lang_dd, diarize_chk, chunk_dd, trim_start_sl, trim_end_sl],
                     outputs=[segments_state, transcript_box, speakers_df, apply_speakers_btn, status_md],
                 )
                 apply_speakers_btn.click(
