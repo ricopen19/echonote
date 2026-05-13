@@ -26,13 +26,13 @@ def get_duration(input_path: str) -> float:
 
 
 def trim(input_path: str, start_sec: float, end_sec: float) -> str:
-    """音声を [start_sec, end_sec] にトリミングして tmp ファイルパスを返す。
+    """音声を [start_sec, end_sec] にトリミングして WAV tmp ファイルパスを返す。
 
     end_sec <= 0 は「末尾まで」として扱う。
-    コーデックコピーのため高速だが、keyframe 境界から数フレームのズレが生じる場合がある。
+    PCM 再エンコードにより、コンテナのサンプル数が正確に揃う。
+    （-c copy は M4A/MP4 末尾のサンプル数ズレで pyannote が失敗するため使用しない）
     """
-    suffix = Path(input_path).suffix or ".mp3"
-    tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
     tmp.close()
 
     cmd = ["ffmpeg", "-y", "-i", input_path]
@@ -40,7 +40,7 @@ def trim(input_path: str, start_sec: float, end_sec: float) -> str:
         cmd += ["-ss", str(start_sec)]
     if end_sec > 0:
         cmd += ["-to", str(end_sec)]
-    cmd += ["-c", "copy", tmp.name]
+    cmd += ["-c:a", "pcm_s16le", tmp.name]
 
     subprocess.run(cmd, check=True, capture_output=True)
     return tmp.name
