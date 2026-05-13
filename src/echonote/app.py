@@ -49,101 +49,96 @@ _WAVEFORM_HTML = """
 </div>
 """
 
-_WAVESURFER_JS = """
-async function() {
-    const { default: WaveSurfer } = await import(
-        'https://cdn.jsdelivr.net/npm/wavesurfer.js@7/dist/wavesurfer.esm.js'
-    );
-    const { default: RegionsPlugin } = await import(
-        'https://cdn.jsdelivr.net/npm/wavesurfer.js@7/dist/plugins/regions.esm.js'
-    );
+_HEAD_SCRIPT = """<script type="module">
+// launch(js=) の実行保証が不明なため head= に script タグを直接注入
+import WaveSurfer from 'https://cdn.jsdelivr.net/npm/wavesurfer.js@7/dist/wavesurfer.esm.js';
+import RegionsPlugin from 'https://cdn.jsdelivr.net/npm/wavesurfer.js@7/dist/plugins/regions.esm.js';
 
-    function fmtSec(s) {
-        s = Math.max(0, s);
-        const m = Math.floor(s / 60), sec = Math.floor(s % 60);
-        return `${m}:${sec.toString().padStart(2, '0')}`;
-    }
-
-    function setGradioNum(elemId, value) {
-        const el = document.getElementById(elemId);
-        if (!el) return;
-        const input = el.querySelector('input[type="number"]');
-        if (!input) return;
-        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-        setter.call(input, String(value));
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        input.dispatchEvent(new Event('change', { bubbles: true }));
-    }
-
-    function initPlayer(url) {
-        if (window.echonoteWS) { window.echonoteWS.destroy(); window.echonoteWS = null; }
-        const container = document.getElementById('echonote-waveform');
-        if (!container) { setTimeout(() => initPlayer(url), 200); return; }
-        container.innerHTML = '';
-
-        const regions = RegionsPlugin.create();
-        const ws = window.echonoteWS = WaveSurfer.create({
-            container,
-            waveColor: '#4a9eff',
-            progressColor: '#1a5eb5',
-            height: 100,
-            plugins: [regions],
-        });
-        ws.load(url);
-
-        ws.on('ready', () => {
-            const dur = ws.getDuration();
-            regions.addRegion({
-                start: 0, end: dur,
-                color: 'rgba(74,158,255,0.2)',
-                drag: true, resize: true,
-            });
-            const timeEl = document.getElementById('echonote-time');
-            if (timeEl) timeEl.textContent = `0:00 / ${fmtSec(dur)}`;
-            const infoEl = document.getElementById('echonote-region-info');
-            if (infoEl) infoEl.textContent = '';
-            setGradioNum('echonote-trim-start', 0);
-            setGradioNum('echonote-trim-end', dur);
-        });
-
-        ws.on('timeupdate', (t) => {
-            const timeEl = document.getElementById('echonote-time');
-            if (timeEl) timeEl.textContent = `${fmtSec(t)} / ${fmtSec(ws.getDuration())}`;
-            const btn = document.getElementById('echonote-play-btn');
-            if (btn) btn.textContent = ws.isPlaying() ? '⏸' : '▶';
-        });
-
-        ws.on('finish', () => {
-            const btn = document.getElementById('echonote-play-btn');
-            if (btn) btn.textContent = '▶';
-        });
-
-        regions.on('region-updated', (region) => {
-            setGradioNum('echonote-trim-start', region.start);
-            setGradioNum('echonote-trim-end', region.end);
-            const infoEl = document.getElementById('echonote-region-info');
-            if (infoEl) infoEl.textContent = `✂️ ${fmtSec(region.start)} 〜 ${fmtSec(region.end)}`;
-        });
-    }
-
-    // ファイル選択時に Object URL を生成 → サーバー URL 形式に依存しない
-    let watchedInput = null;
-    setInterval(() => {
-        const container = document.getElementById('echonote-file-input');
-        if (!container) return;
-        const fileInput = container.querySelector('input[type="file"]');
-        if (!fileInput || fileInput === watchedInput) return;
-        watchedInput = fileInput;
-        fileInput.addEventListener('change', (e) => {
-            const file = e.target.files && e.target.files[0];
-            if (!file) return;
-            if (window._echonoteObjUrl) URL.revokeObjectURL(window._echonoteObjUrl);
-            window._echonoteObjUrl = URL.createObjectURL(file);
-            initPlayer(window._echonoteObjUrl);
-        });
-    }, 500);
+function fmtSec(s) {
+    s = Math.max(0, s);
+    const m = Math.floor(s / 60), sec = Math.floor(s % 60);
+    return `${m}:${sec.toString().padStart(2, '0')}`;
 }
-"""
+
+function setGradioNum(elemId, value) {
+    const el = document.getElementById(elemId);
+    if (!el) return;
+    const input = el.querySelector('input[type="number"]');
+    if (!input) return;
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+    setter.call(input, String(value));
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+function initPlayer(url) {
+    if (window.echonoteWS) { window.echonoteWS.destroy(); window.echonoteWS = null; }
+    const container = document.getElementById('echonote-waveform');
+    if (!container) { setTimeout(() => initPlayer(url), 200); return; }
+    container.innerHTML = '';
+
+    const regions = RegionsPlugin.create();
+    const ws = window.echonoteWS = WaveSurfer.create({
+        container,
+        waveColor: '#4a9eff',
+        progressColor: '#1a5eb5',
+        height: 100,
+        plugins: [regions],
+    });
+    ws.load(url);
+
+    ws.on('ready', () => {
+        const dur = ws.getDuration();
+        regions.addRegion({
+            start: 0, end: dur,
+            color: 'rgba(74,158,255,0.2)',
+            drag: true, resize: true,
+        });
+        const timeEl = document.getElementById('echonote-time');
+        if (timeEl) timeEl.textContent = `0:00 / ${fmtSec(dur)}`;
+        const infoEl = document.getElementById('echonote-region-info');
+        if (infoEl) infoEl.textContent = '';
+        setGradioNum('echonote-trim-start', 0);
+        setGradioNum('echonote-trim-end', dur);
+    });
+
+    ws.on('timeupdate', (t) => {
+        const timeEl = document.getElementById('echonote-time');
+        if (timeEl) timeEl.textContent = `${fmtSec(t)} / ${fmtSec(ws.getDuration())}`;
+        const btn = document.getElementById('echonote-play-btn');
+        if (btn) btn.textContent = ws.isPlaying() ? '⏸' : '▶';
+    });
+
+    ws.on('finish', () => {
+        const btn = document.getElementById('echonote-play-btn');
+        if (btn) btn.textContent = '▶';
+    });
+
+    regions.on('region-updated', (region) => {
+        setGradioNum('echonote-trim-start', region.start);
+        setGradioNum('echonote-trim-end', region.end);
+        const infoEl = document.getElementById('echonote-region-info');
+        if (infoEl) infoEl.textContent = `✂️ ${fmtSec(region.start)} 〜 ${fmtSec(region.end)}`;
+    });
+}
+
+// ファイル選択時に Object URL を生成 → サーバー URL 形式に依存しない
+let watchedInput = null;
+setInterval(() => {
+    const container = document.getElementById('echonote-file-input');
+    if (!container) return;
+    const fileInput = container.querySelector('input[type="file"]');
+    if (!fileInput || fileInput === watchedInput) return;
+    watchedInput = fileInput;
+    fileInput.addEventListener('change', (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        if (window._echonoteObjUrl) URL.revokeObjectURL(window._echonoteObjUrl);
+        window._echonoteObjUrl = URL.createObjectURL(file);
+        initPlayer(window._echonoteObjUrl);
+    });
+}, 500);
+</script>"""
 
 TEMPLATE_NAMES = {
     "会議議事録": "meeting",
@@ -555,7 +550,7 @@ _HIDE_CSS = ".echonote-hidden { display: none !important; }"
 
 def main():
     demo = build_ui()
-    demo.launch(js=_WAVESURFER_JS, css=_HIDE_CSS)
+    demo.launch(head=_HEAD_SCRIPT, css=_HIDE_CSS)
 
 
 if __name__ == "__main__":
