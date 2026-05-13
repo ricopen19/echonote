@@ -23,9 +23,11 @@ def _fmt_sec(sec: int) -> str:
 def _on_audio_upload(audio_path):
     if audio_path is None:
         return 0.0, ""
+    from urllib.parse import quote
     dur = trimmer.get_duration(audio_path)
-    real_path = str(Path(audio_path).resolve())
-    return dur, f"/file={real_path}"
+    # resolve() で symlink を展開しない — Gradio が認識しているパスのまま渡す
+    encoded = quote(str(audio_path), safe="/:@!$&'()*+,;=._~-")
+    return dur, f"/file={encoded}"
 
 
 def _update_trim_info(start, end, duration):
@@ -330,17 +332,24 @@ def build_ui() -> gr.Blocks:
                             type="filepath",
                         )
                         gr.HTML(_WAVEFORM_HTML)
-                        # JS との通信用 hidden コンポーネント
+                        # JS との通信用コンポーネント（CSS で非表示 — visible=False だと DOM から消える）
                         audio_url_txt = gr.Textbox(
-                            visible=False, elem_id="echonote-audio-url",
+                            value="", visible=True,
+                            elem_id="echonote-audio-url",
+                            elem_classes=["echonote-hidden"],
+                            label="",
                         )
                         trim_start_num = gr.Number(
-                            value=0.0, visible=False,
-                            elem_id="echonote-trim-start", label="trim_start",
+                            value=0.0, visible=True,
+                            elem_id="echonote-trim-start",
+                            elem_classes=["echonote-hidden"],
+                            label="trim_start",
                         )
                         trim_end_num = gr.Number(
-                            value=0.0, visible=False,
-                            elem_id="echonote-trim-end", label="trim_end",
+                            value=0.0, visible=True,
+                            elem_id="echonote-trim-end",
+                            elem_classes=["echonote-hidden"],
+                            label="trim_end",
                         )
                         trim_info_md = gr.Markdown("")
                     with gr.Column(scale=1):
@@ -542,9 +551,12 @@ def build_ui() -> gr.Blocks:
     return demo
 
 
+_HIDE_CSS = ".echonote-hidden { display: none !important; }"
+
+
 def main():
     demo = build_ui()
-    demo.launch(js=_WAVESURFER_JS)
+    demo.launch(js=_WAVESURFER_JS, css=_HIDE_CSS)
 
 
 if __name__ == "__main__":
