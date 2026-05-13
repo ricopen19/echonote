@@ -491,8 +491,18 @@ def build_ui() -> gr.Blocks:
                     label="セクション内容",
                     lines=10,
                     interactive=False,
-                    show_copy_button=True,
                     visible=False,
+                    elem_id="echonote-section-text",
+                )
+                copy_section_btn = gr.Button(
+                    "📋 このセクションをコピー", size="sm", variant="secondary",
+                )
+                copy_section_btn.click(
+                    fn=None,
+                    js="""() => {
+                        const ta = document.querySelector('#echonote-section-text textarea');
+                        if (ta) navigator.clipboard.writeText(ta.value).catch(() => {});
+                    }""",
                 )
 
                 with gr.Row():
@@ -504,7 +514,7 @@ def build_ui() -> gr.Blocks:
                         for i in range(7)
                     ]
                     prev_btn_sec = gr.Button("◀", size="sm", visible=False, min_width=40, scale=0)
-                    page_display_md = gr.Markdown("", scale=2)
+                    page_display_md = gr.Markdown("")
                     next_btn_sec = gr.Button("▶", size="sm", visible=False, min_width=40, scale=0)
 
                 with gr.Row():
