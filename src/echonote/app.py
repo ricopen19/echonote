@@ -274,50 +274,62 @@ def _section_text(section_segments: list[dict]) -> str:
     return "\n".join(lines)
 
 
+_SHOW: list[str] = []
+_HIDE: list[str] = ["echonote-hidden"]
+
+
 def _build_section_ui(sections: list, page: int) -> tuple:
+    """nav_outputs (16 要素) に対応するタプルを返す。
+    visible トグルの代わりに elem_classes で表示制御し Gradio 6 の DOM 再挿入バグを回避する。
+    """
     n = len(sections)
     if n == 0:
         return (
             0,
             gr.update(value=""),
             gr.update(value="", visible=False),
-            *[gr.update(visible=False) for _ in range(7)],
-            gr.update(visible=False),
-            gr.update(visible=False),
-            gr.update(value=""),
-            gr.update(visible=False),
-            gr.update(visible=False),
+            gr.update(elem_classes=_HIDE),           # copy_btn
+            *[gr.update(elem_classes=_HIDE) for _ in range(7)],
+            gr.update(elem_classes=_HIDE),           # prev
+            gr.update(elem_classes=_HIDE),           # next
+            gr.update(value=""),                     # display
+            gr.update(elem_classes=_HIDE),           # jump_input
+            gr.update(elem_classes=_HIDE),           # jump_btn
         )
     page = max(0, min(page, n - 1))
     text = _section_text(sections[page])
     header = f"**セクション {page + 1} / {n}**"
     if n <= 7:
         btn_updates = [
-            gr.update(value=str(i + 1), visible=True, variant="primary" if i == page else "secondary")
-            if i < n else gr.update(visible=False)
+            gr.update(
+                value=str(i + 1), elem_classes=_SHOW,
+                variant="primary" if i == page else "secondary",
+            ) if i < n else gr.update(elem_classes=_HIDE)
             for i in range(7)
         ]
         return (
             page,
             gr.update(value=header),
             gr.update(value=text, visible=True),
+            gr.update(elem_classes=_SHOW),           # copy_btn
             *btn_updates,
-            gr.update(visible=False),
-            gr.update(visible=False),
-            gr.update(value=""),
-            gr.update(visible=False),
-            gr.update(visible=False),
+            gr.update(elem_classes=_HIDE),           # prev
+            gr.update(elem_classes=_HIDE),           # next
+            gr.update(value=""),                     # display
+            gr.update(elem_classes=_HIDE),           # jump_input
+            gr.update(elem_classes=_HIDE),           # jump_btn
         )
     return (
         page,
         gr.update(value=header),
         gr.update(value=text, visible=True),
-        *[gr.update(visible=False) for _ in range(7)],
-        gr.update(visible=True),
-        gr.update(visible=True),
-        gr.update(value=f"{page + 1} / {n}"),
-        gr.update(visible=True),
-        gr.update(visible=True),
+        gr.update(elem_classes=_SHOW),               # copy_btn
+        *[gr.update(elem_classes=_HIDE) for _ in range(7)],
+        gr.update(elem_classes=_SHOW),               # prev
+        gr.update(elem_classes=_SHOW),               # next
+        gr.update(value=f"{page + 1} / {n}"),        # display
+        gr.update(elem_classes=_SHOW),               # jump_input
+        gr.update(elem_classes=_SHOW),               # jump_btn
     )
 
 
@@ -486,7 +498,38 @@ def build_ui() -> gr.Blocks:
                     )
                     detect_btn = gr.Button("🔍 セクションを検出", scale=1, variant="secondary")
 
-                section_header_md = gr.Markdown("")
+                with gr.Row():
+                    section_header_md = gr.Markdown("")
+                    copy_section_btn = gr.Button(
+                        "📋 コピー", size="sm", variant="secondary",
+                        visible=True, elem_classes=["echonote-hidden"], scale=0,
+                    )
+
+                with gr.Row():
+                    num_btns = [
+                        gr.Button(
+                            str(i + 1), size="sm", variant="secondary",
+                            visible=True, elem_classes=["echonote-hidden"], min_width=40, scale=0,
+                        )
+                        for i in range(7)
+                    ]
+                    prev_btn_sec = gr.Button(
+                        "◀", size="sm", visible=True, elem_classes=["echonote-hidden"], min_width=40, scale=0,
+                    )
+                    page_display_md = gr.Markdown("")
+                    next_btn_sec = gr.Button(
+                        "▶", size="sm", visible=True, elem_classes=["echonote-hidden"], min_width=40, scale=0,
+                    )
+
+                with gr.Row():
+                    jump_input = gr.Number(
+                        label="ページ番号", minimum=1, value=1, step=1,
+                        visible=True, elem_classes=["echonote-hidden"], scale=1, precision=0,
+                    )
+                    jump_btn = gr.Button(
+                        "移動", size="sm", visible=True, elem_classes=["echonote-hidden"], scale=0,
+                    )
+
                 section_text_box = gr.Textbox(
                     label="セクション内容",
                     lines=10,
@@ -494,35 +537,6 @@ def build_ui() -> gr.Blocks:
                     visible=False,
                     elem_id="echonote-section-text",
                 )
-                copy_section_btn = gr.Button(
-                    "📋 このセクションをコピー", size="sm", variant="secondary",
-                )
-                copy_section_btn.click(
-                    fn=None,
-                    js="""() => {
-                        const ta = document.querySelector('#echonote-section-text textarea');
-                        if (ta) navigator.clipboard.writeText(ta.value).catch(() => {});
-                    }""",
-                )
-
-                with gr.Row():
-                    num_btns = [
-                        gr.Button(
-                            str(i + 1), size="sm", variant="secondary",
-                            visible=False, min_width=40, scale=0,
-                        )
-                        for i in range(7)
-                    ]
-                    prev_btn_sec = gr.Button("◀", size="sm", visible=False, min_width=40, scale=0)
-                    page_display_md = gr.Markdown("")
-                    next_btn_sec = gr.Button("▶", size="sm", visible=False, min_width=40, scale=0)
-
-                with gr.Row():
-                    jump_input = gr.Number(
-                        label="ページ番号", minimum=1, value=1, step=1,
-                        visible=False, scale=1, precision=0,
-                    )
-                    jump_btn = gr.Button("移動", size="sm", visible=False, scale=0)
 
                 audio_input.change(
                     fn=_on_audio_upload,
@@ -562,8 +576,15 @@ def build_ui() -> gr.Blocks:
                     }""",
                 )
 
+                copy_section_btn.click(
+                    fn=None,
+                    js="""() => {
+                        const ta = document.querySelector('#echonote-section-text textarea');
+                        if (ta) navigator.clipboard.writeText(ta.value).catch(() => {});
+                    }""",
+                )
                 nav_outputs = [
-                    sec_page_state, section_header_md, section_text_box,
+                    sec_page_state, section_header_md, section_text_box, copy_section_btn,
                     *num_btns, prev_btn_sec, next_btn_sec, page_display_md,
                     jump_input, jump_btn,
                 ]
