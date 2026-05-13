@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import tempfile
 from pathlib import Path
 
@@ -140,9 +141,11 @@ setInterval(() => {
 }, 500);
 </script>"""
 
-TEMPLATE_NAMES = {
-    "会議議事録": "meeting",
-}
+_INVALID_FNAME = re.compile(r'[/\\:*?"<>|\x00-\x1f]')
+
+
+def _list_templates() -> list[str]:
+    return sorted(p.stem for p in _PROMPTS_DIR.glob("*.txt"))
 
 
 def _load_prompt(name: str) -> str:
@@ -363,8 +366,42 @@ def _make_nav_page(idx: int):
 # ── Tab 2: 記録生成 ───────────────────────────────────────────────────────────
 
 def _on_template_change(template_label: str) -> str:
-    name = TEMPLATE_NAMES.get(template_label, "meeting")
-    return _load_prompt(name)
+    return _load_prompt(template_label)
+
+
+def _do_save_overwrite(name: str, content: str) -> str:
+    if not name:
+        return "⚠️ テンプレートが選択されていません。"
+    (_PROMPTS_DIR / f"{name}.txt").write_text(content, encoding="utf-8")
+    return f"✅ 「{name}」を保存しました。"
+
+
+def _do_create_template(new_name: str, content: str):
+    new_name = new_name.strip()
+    if not new_name:
+        return gr.update(), gr.update(), "⚠️ テンプレート名を入力してください。"
+    if _INVALID_FNAME.search(new_name):
+        return gr.update(), gr.update(), "⚠️ テンプレート名に使えない文字が含まれています。"
+    if (_PROMPTS_DIR / f"{new_name}.txt").exists():
+        return gr.update(), gr.update(), f"⚠️「{new_name}」は既に存在します。"
+    (_PROMPTS_DIR / f"{new_name}.txt").write_text(content, encoding="utf-8")
+    choices = _list_templates()
+    return gr.update(choices=choices, value=new_name), "", f"✅ 「{new_name}」を作成しました。"
+
+
+def _do_delete_template(name: str):
+    if not name:
+        return gr.update(), gr.update(), "⚠️ テンプレートが選択されていません。"
+    if len(_list_templates()) <= 1:
+        return gr.update(), gr.update(), "⚠️ 最後のテンプレートは削除できません。"
+    (_PROMPTS_DIR / f"{name}.txt").unlink(missing_ok=True)
+    remaining = _list_templates()
+    new_val = remaining[0] if remaining else ""
+    return (
+        gr.update(choices=remaining, value=new_val),
+        gr.update(value=_load_prompt(new_val) if new_val else ""),
+        f"🗑️ 「{name}」を削除しました。",
+    )
 
 
 def _do_generate(segments, prompt_template, llm_url, llm_model):
@@ -408,7 +445,8 @@ def _do_download_docx(content: str):
 
 def build_ui() -> gr.Blocks:
     settings = _SETTINGS
-    default_prompt = _load_prompt("meeting")
+    _tpls = _list_templates()
+    default_prompt = _load_prompt(_tpls[0]) if _tpls else ""
 
     with gr.Blocks(title="Echonote", fill_height=False) as demo:
         gr.Markdown("# Echonote 🎧\n音声ファイルから構造化テキスト記録を生成します。")
@@ -620,10 +658,18 @@ def build_ui() -> gr.Blocks:
                 with gr.Row():
                     template_dd = gr.Dropdown(
                         label="テンプレート",
-                        choices=list(TEMPLATE_NAMES.keys()),
-                        value="会議議事録",
-                        scale=1,
+                        choices=_tpls,
+                        value=_tpls[0] if _tpls else None,
+                        scale=2,
                     )
+                    save_tpl_btn = gr.Button("💾 上書き保存", scale=0, size="sm", variant="secondary")
+                    del_tpl_btn = gr.Button("🗑️ 削除", scale=0, size="sm", variant="stop")
+                with gr.Row():
+                    new_tpl_name = gr.Textbox(
+                        label="新規テンプレート名", placeholder="例：面接メモ", scale=2,
+                    )
+                    new_tpl_btn = gr.Button("➕ 新規保存", scale=0, size="sm", variant="secondary")
+                tpl_status_md = gr.Markdown("")
                 prompt_box = gr.Textbox(
                     label="プロンプト（編集可能）",
                     value=default_prompt,
@@ -642,6 +688,21 @@ def build_ui() -> gr.Blocks:
                 download_file = gr.File(label="ダウンロード", visible=False)
 
                 template_dd.change(fn=_on_template_change, inputs=template_dd, outputs=prompt_box)
+                save_tpl_btn.click(
+                    fn=_do_save_overwrite,
+                    inputs=[template_dd, prompt_box],
+                    outputs=tpl_status_md,
+                )
+                new_tpl_btn.click(
+                    fn=_do_create_template,
+                    inputs=[new_tpl_name, prompt_box],
+                    outputs=[template_dd, new_tpl_name, tpl_status_md],
+                )
+                del_tpl_btn.click(
+                    fn=_do_delete_template,
+                    inputs=[template_dd],
+                    outputs=[template_dd, prompt_box, tpl_status_md],
+                )
 
                 llm_url_state = gr.State(settings.effective_llm_url())
                 llm_model_state = gr.State(settings.effective_llm_model())
