@@ -22,12 +22,8 @@ def _fmt_sec(sec: int) -> str:
 
 def _on_audio_upload(audio_path):
     if audio_path is None:
-        return 0.0, ""
-    from urllib.parse import quote
-    dur = trimmer.get_duration(audio_path)
-    # resolve() で symlink を展開しない — Gradio が認識しているパスのまま渡す
-    encoded = quote(str(audio_path), safe="/:@!$&'()*+,;=._~-")
-    return dur, f"/file={encoded}"
+        return 0.0
+    return trimmer.get_duration(audio_path)
 
 
 def _update_trim_info(start, end, duration):
@@ -82,7 +78,7 @@ async function() {
     function initPlayer(url) {
         if (window.echonoteWS) { window.echonoteWS.destroy(); window.echonoteWS = null; }
         const container = document.getElementById('echonote-waveform');
-        if (!container) return;
+        if (!container) { setTimeout(() => initPlayer(url), 200); return; }
         container.innerHTML = '';
 
         const regions = RegionsPlugin.create();
@@ -130,13 +126,21 @@ async function() {
         });
     }
 
-    let lastUrl = '';
+    // ファイル選択時に Object URL を生成 → サーバー URL 形式に依存しない
+    let watchedInput = null;
     setInterval(() => {
-        const wrapper = document.getElementById('echonote-audio-url');
-        if (!wrapper) return;
-        const ta = wrapper.querySelector('textarea');
-        const url = (ta ? ta.value : '').trim();
-        if (url && url !== lastUrl) { lastUrl = url; initPlayer(url); }
+        const container = document.getElementById('echonote-file-input');
+        if (!container) return;
+        const fileInput = container.querySelector('input[type="file"]');
+        if (!fileInput || fileInput === watchedInput) return;
+        watchedInput = fileInput;
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files && e.target.files[0];
+            if (!file) return;
+            if (window._echonoteObjUrl) URL.revokeObjectURL(window._echonoteObjUrl);
+            window._echonoteObjUrl = URL.createObjectURL(file);
+            initPlayer(window._echonoteObjUrl);
+        });
     }, 500);
 }
 """
@@ -330,15 +334,10 @@ def build_ui() -> gr.Blocks:
                             label="音声ファイル",
                             file_types=["audio"],
                             type="filepath",
+                            elem_id="echonote-file-input",
                         )
                         gr.HTML(_WAVEFORM_HTML)
-                        # JS との通信用コンポーネント（CSS で非表示 — visible=False だと DOM から消える）
-                        audio_url_txt = gr.Textbox(
-                            value="", visible=True,
-                            elem_id="echonote-audio-url",
-                            elem_classes=["echonote-hidden"],
-                            label="",
-                        )
+                        # trim 値を JS → Python に渡す（CSS 非表示 — visible=False だと DOM から消える）
                         trim_start_num = gr.Number(
                             value=0.0, visible=True,
                             elem_id="echonote-trim-start",
@@ -394,7 +393,7 @@ def build_ui() -> gr.Blocks:
                 audio_input.change(
                     fn=_on_audio_upload,
                     inputs=[audio_input],
-                    outputs=[duration_state, audio_url_txt],
+                    outputs=[duration_state],
                 )
                 trim_start_num.change(
                     fn=_update_trim_info,
