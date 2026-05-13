@@ -22,6 +22,22 @@ def segments_to_transcript(segments: list[Segment]) -> str:
     return "\n".join(lines)
 
 
+def split_by_gap(segments: list[Segment], min_gap_sec: float) -> list[list[Segment]]:
+    """無音ギャップ（min_gap_sec 秒以上）でセグメントをセクションに分割する。"""
+    if not segments:
+        return []
+    sections: list[list[Segment]] = []
+    current: list[Segment] = [segments[0]]
+    for seg in segments[1:]:
+        if seg["start"] - current[-1]["end"] >= min_gap_sec:
+            sections.append(current)
+            current = [seg]
+        else:
+            current.append(seg)
+    sections.append(current)
+    return sections
+
+
 def to_markdown(content: str) -> str:
     return content
 

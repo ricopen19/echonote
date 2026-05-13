@@ -263,6 +263,91 @@ def _do_apply_speakers(segments: list[dict], df):
     return updated, exporter.segments_to_transcript(updated)
 
 
+# ── セクション検出ヘルパー ───────────────────────────────────────────────────────
+
+def _section_text(section_segments: list[dict]) -> str:
+    lines = []
+    for s in section_segments:
+        speaker = s.get("speaker", "")
+        prefix = f"{speaker}: " if speaker else ""
+        lines.append(f"{prefix}{s['text'].strip()}")
+    return "\n".join(lines)
+
+
+def _build_section_ui(sections: list, page: int) -> tuple:
+    n = len(sections)
+    if n == 0:
+        return (
+            0,
+            gr.update(value=""),
+            gr.update(value="", visible=False),
+            *[gr.update(visible=False) for _ in range(7)],
+            gr.update(visible=False),
+            gr.update(visible=False),
+            gr.update(value=""),
+            gr.update(visible=False),
+            gr.update(visible=False),
+        )
+    page = max(0, min(page, n - 1))
+    text = _section_text(sections[page])
+    header = f"**セクション {page + 1} / {n}**"
+    if n <= 7:
+        btn_updates = [
+            gr.update(value=str(i + 1), visible=True, variant="primary" if i == page else "secondary")
+            if i < n else gr.update(visible=False)
+            for i in range(7)
+        ]
+        return (
+            page,
+            gr.update(value=header),
+            gr.update(value=text, visible=True),
+            *btn_updates,
+            gr.update(visible=False),
+            gr.update(visible=False),
+            gr.update(value=""),
+            gr.update(visible=False),
+            gr.update(visible=False),
+        )
+    return (
+        page,
+        gr.update(value=header),
+        gr.update(value=text, visible=True),
+        *[gr.update(visible=False) for _ in range(7)],
+        gr.update(visible=True),
+        gr.update(visible=True),
+        gr.update(value=f"{page + 1} / {n}"),
+        gr.update(visible=True),
+        gr.update(visible=True),
+    )
+
+
+def _do_detect_sections(segments, gap_sec):
+    if not segments:
+        raise gr.Error("先に文字起こしを実行してください。")
+    sections = exporter.split_by_gap(segments, float(gap_sec))
+    return (sections,) + _build_section_ui(sections, 0)
+
+
+def _nav_prev(sections, page):
+    return _build_section_ui(sections, max(0, int(page) - 1))
+
+
+def _nav_next(sections, page):
+    return _build_section_ui(sections, min(len(sections) - 1, int(page) + 1))
+
+
+def _nav_jump(sections, jump_val):
+    n = len(sections)
+    page = max(0, min(int(jump_val or 1) - 1, n - 1))
+    return _build_section_ui(sections, page)
+
+
+def _make_nav_page(idx: int):
+    def _fn(sections):
+        return _build_section_ui(sections, idx)
+    return _fn
+
+
 # ── Tab 2: 記録生成 ───────────────────────────────────────────────────────────
 
 def _on_template_change(template_label: str) -> str:
@@ -389,6 +474,46 @@ def build_ui() -> gr.Blocks:
                 )
                 apply_speakers_btn = gr.Button("話者名を適用", visible=False)
 
+                gr.Markdown("---")
+                sections_state = gr.State([])
+                sec_page_state = gr.State(0)
+
+                with gr.Row():
+                    gap_slider = gr.Slider(
+                        label="無音ギャップ閾値（秒）",
+                        minimum=2, maximum=30, value=5, step=1,
+                        scale=3,
+                    )
+                    detect_btn = gr.Button("🔍 セクションを検出", scale=1, variant="secondary")
+
+                section_header_md = gr.Markdown("")
+                section_text_box = gr.Textbox(
+                    label="セクション内容",
+                    lines=10,
+                    interactive=False,
+                    show_copy_button=True,
+                    visible=False,
+                )
+
+                with gr.Row():
+                    num_btns = [
+                        gr.Button(
+                            str(i + 1), size="sm", variant="secondary",
+                            visible=False, min_width=40, scale=0,
+                        )
+                        for i in range(7)
+                    ]
+                    prev_btn_sec = gr.Button("◀", size="sm", visible=False, min_width=40, scale=0)
+                    page_display_md = gr.Markdown("", scale=2)
+                    next_btn_sec = gr.Button("▶", size="sm", visible=False, min_width=40, scale=0)
+
+                with gr.Row():
+                    jump_input = gr.Number(
+                        label="ページ番号", minimum=1, value=1, step=1,
+                        visible=False, scale=1, precision=0,
+                    )
+                    jump_btn = gr.Button("移動", size="sm", visible=False, scale=0)
+
                 audio_input.change(
                     fn=_on_audio_upload,
                     inputs=[audio_input],
@@ -426,6 +551,38 @@ def build_ui() -> gr.Blocks:
                         navigator.clipboard.writeText(text).catch(() => {});
                     }""",
                 )
+
+                nav_outputs = [
+                    sec_page_state, section_header_md, section_text_box,
+                    *num_btns, prev_btn_sec, next_btn_sec, page_display_md,
+                    jump_input, jump_btn,
+                ]
+                detect_btn.click(
+                    fn=_do_detect_sections,
+                    inputs=[segments_state, gap_slider],
+                    outputs=[sections_state] + nav_outputs,
+                )
+                prev_btn_sec.click(
+                    fn=_nav_prev,
+                    inputs=[sections_state, sec_page_state],
+                    outputs=nav_outputs,
+                )
+                next_btn_sec.click(
+                    fn=_nav_next,
+                    inputs=[sections_state, sec_page_state],
+                    outputs=nav_outputs,
+                )
+                jump_btn.click(
+                    fn=_nav_jump,
+                    inputs=[sections_state, jump_input],
+                    outputs=nav_outputs,
+                )
+                for i, _nb in enumerate(num_btns):
+                    _nb.click(
+                        fn=_make_nav_page(i),
+                        inputs=[sections_state],
+                        outputs=nav_outputs,
+                    )
 
             # ── Tab 2 ──────────────────────────────────────────────────────
             with gr.TabItem("📄 記録生成"):
