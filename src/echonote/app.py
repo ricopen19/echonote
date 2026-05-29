@@ -498,7 +498,7 @@ def build_ui() -> gr.Blocks:
                         )
                         chunk_dd = gr.Dropdown(
                             label="チャンク分割（長音声OOM対策）",
-                            choices=["5分", "10分"],
+                            choices=["3分", "5分", "10分"],
                             value="5分",
                         )
 
