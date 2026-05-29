@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import gc
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -72,24 +73,59 @@ def _get_audio_duration(audio_path: str) -> float:
         return 0.0
 
 
+def _find_silence_split_points(audio_path: str, max_chunk_sec: int) -> list[float]:
+    """ffmpeg silencedetect で無音中間点を検出し、max_chunk_sec 以内の分割点を貪欲法で返す。
+    無音が検出できない場合は空リストを返す（呼び出し側が時間固定にフォールバック）。
+    """
+    result = subprocess.run(
+        ["ffmpeg", "-i", audio_path, "-af", "silencedetect=noise=-40dB:d=0.3", "-f", "null", "-"],
+        capture_output=True,
+        text=True,
+    )
+    midpoints = []
+    for m in re.finditer(r"silence_end: ([\d.]+) \| silence_duration: ([\d.]+)", result.stderr):
+        end, dur = float(m.group(1)), float(m.group(2))
+        midpoints.append(end - dur / 2)
+
+    if not midpoints:
+        return []
+
+    splits: list[float] = []
+    last = 0.0
+    while True:
+        candidates = [p for p in midpoints if last < p <= last + max_chunk_sec]
+        if not candidates:
+            break
+        last = max(candidates)
+        splits.append(last)
+    return splits
+
+
 def _split_audio_chunks(
     audio_path: str, chunk_sec: int, tmp_dir: str
 ) -> list[tuple[str, float]]:
-    """ffmpeg でファイルを chunk_sec 秒ごとに WAV 分割する。(chunk_path, offset_sec) のリストを返す。"""
+    """音声を無音区間で分割する。無音が検出できない場合は時間固定にフォールバック。
+    (chunk_path, offset_sec) のリストを返す。
+    """
     duration = _get_audio_duration(audio_path)
     if duration <= 0:
         return [(audio_path, 0.0)]
+
+    split_points = _find_silence_split_points(audio_path, chunk_sec)
+    if not split_points:
+        # フォールバック: 時間固定分割
+        split_points = [s for s in (float(i) * chunk_sec for i in range(1, int(duration / chunk_sec) + 1)) if s < duration]
+
+    boundaries = [0.0, *split_points, duration]
     chunks: list[tuple[str, float]] = []
-    start = 0.0
-    idx = 0
-    while start < duration:
+    for idx, (start, end) in enumerate(zip(boundaries, boundaries[1:])):
         out_path = os.path.join(tmp_dir, f"chunk_{idx:04d}.wav")
         subprocess.run(
             [
                 "ffmpeg", "-y",
                 "-i", audio_path,
                 "-ss", str(start),
-                "-t", str(chunk_sec),
+                "-t", str(end - start),
                 "-ar", "16000",
                 "-ac", "1",
                 "-c:a", "pcm_s16le",
@@ -99,8 +135,6 @@ def _split_audio_chunks(
             check=True,
         )
         chunks.append((out_path, start))
-        start += chunk_sec
-        idx += 1
     return chunks
 
 
@@ -125,13 +159,14 @@ def _stream_faster_whisper(
             with tempfile.TemporaryDirectory() as tmp_dir:
                 chunks = _split_audio_chunks(audio_path, chunk_minutes * 60, tmp_dir)
                 total = len(chunks)
-                for i, (chunk_path, offset_sec) in enumerate(chunks):
-                    end_min = min(offset_sec + chunk_minutes * 60, duration) / 60
+                # 各チャンクの終端時刻: 次チャンクの開始 or 音声全体の長さ
+                ends = [chunks[j + 1][1] for j in range(len(chunks) - 1)] + [duration]
+                for i, ((chunk_path, offset_sec), end_sec) in enumerate(zip(chunks, ends)):
                     if on_chunk:
-                        on_chunk(i, total, offset_sec / 60, end_min)
+                        on_chunk(i, total, offset_sec / 60, end_sec / 60)
                     print(
                         f"[transcriber] チャンク {i + 1}/{total}"
-                        f"（{offset_sec / 60:.0f}〜{end_min:.0f} 分）処理中",
+                        f"（{offset_sec / 60:.0f}〜{end_sec / 60:.0f} 分）処理中",
                         flush=True,
                     )
                     segs, _ = model.transcribe(chunk_path, language=language, beam_size=beam_size, vad_filter=True)
