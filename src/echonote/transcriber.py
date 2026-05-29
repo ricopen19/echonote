@@ -27,7 +27,8 @@ _SAMPLE_RATE = 16_000
 _CHUNK_SECONDS = 30
 _mlx_model_cache: dict = {}
 
-_BEAM_SIZE = 3
+_BEAM_SIZE_BY_TIER = {"light": 1, "standard": 3, "performance": 5}
+_BEAM_SIZE_DEFAULT = 3
 _INTER_CHUNK_SLEEP_SEC = 5
 
 
@@ -111,6 +112,7 @@ def _stream_faster_whisper(
     compute_type: str = "int8",
     on_chunk: Callable[[int, int, float, float], None] | None = None,
     chunk_minutes: int = 5,
+    beam_size: int = _BEAM_SIZE_DEFAULT,
 ):
     from faster_whisper import WhisperModel
 
@@ -132,7 +134,7 @@ def _stream_faster_whisper(
                         f"（{offset_sec / 60:.0f}〜{end_min:.0f} 分）処理中",
                         flush=True,
                     )
-                    segs, _ = model.transcribe(chunk_path, language=language, beam_size=_BEAM_SIZE)
+                    segs, _ = model.transcribe(chunk_path, language=language, beam_size=beam_size, vad_filter=True)
                     for s in segs:
                         text = s.text.strip()
                         if text:
@@ -147,7 +149,7 @@ def _stream_faster_whisper(
         else:
             if on_chunk:
                 on_chunk(0, 1, 0.0, duration / 60)
-            segments, _ = model.transcribe(audio_path, language=language, beam_size=_BEAM_SIZE)
+            segments, _ = model.transcribe(audio_path, language=language, beam_size=beam_size, vad_filter=True)
             for s in segments:
                 yield {"start": s.start, "end": s.end, "text": s.text.strip()}
     finally:
@@ -236,6 +238,8 @@ def transcribe_stream(
         and (settings is None or settings.platform.value == "mac")
     )
 
+    beam_size = _BEAM_SIZE_BY_TIER.get(settings.hw_tier.value, _BEAM_SIZE_DEFAULT) if settings else _BEAM_SIZE_DEFAULT
+
     if use_mlx:
         try:
             yield from _stream_mlx_whisper(audio_path, model_size, language)
@@ -254,7 +258,7 @@ def transcribe_stream(
                 traceback.print_exc()
                 print(f"[transcriber] mlx-whisper 失敗 ({type(e).__name__}) → faster-whisper FB", flush=True)
 
-    yield from _stream_faster_whisper(audio_path, model_size, language, on_chunk=on_chunk, chunk_minutes=chunk_minutes)
+    yield from _stream_faster_whisper(audio_path, model_size, language, on_chunk=on_chunk, chunk_minutes=chunk_minutes, beam_size=beam_size)
 
 
 def transcribe(
