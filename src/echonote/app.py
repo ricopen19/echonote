@@ -124,19 +124,34 @@ function initPlayer(url) {
 }
 
 // ファイル選択時に Object URL を生成 → サーバー URL 形式に依存しない
+function _loadFile(file) {
+    if (!file) return;
+    if (window._echonoteObjUrl) URL.revokeObjectURL(window._echonoteObjUrl);
+    window._echonoteObjUrl = URL.createObjectURL(file);
+    initPlayer(window._echonoteObjUrl);
+}
+
 let watchedInput = null;
+let dropWatched = false;
 setInterval(() => {
     const container = document.getElementById('echonote-file-input');
     if (!container) return;
+
+    // D&D: Gradio が Svelte で横取りするため change イベントが発火しない
+    // → capture フェーズで drop を先取りして dataTransfer から File を取得
+    if (!dropWatched) {
+        dropWatched = true;
+        container.addEventListener('drop', (e) => {
+            const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+            _loadFile(file);
+        }, true);
+    }
+
     const fileInput = container.querySelector('input[type="file"]');
     if (!fileInput || fileInput === watchedInput) return;
     watchedInput = fileInput;
     fileInput.addEventListener('change', (e) => {
-        const file = e.target.files && e.target.files[0];
-        if (!file) return;
-        if (window._echonoteObjUrl) URL.revokeObjectURL(window._echonoteObjUrl);
-        window._echonoteObjUrl = URL.createObjectURL(file);
-        initPlayer(window._echonoteObjUrl);
+        _loadFile(e.target.files && e.target.files[0]);
     });
 }, 500);
 </script>"""
