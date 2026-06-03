@@ -456,6 +456,76 @@ def _do_download_docx(content: str):
         return tmp.name
 
 
+# ── Tab 3: 貼り付け転写 ───────────────────────────────────────────────────────
+
+def _aligned_to_text(aligned: list[dict]) -> str:
+    return "\n\n".join(f"【{b['speaker']}】\n{b['text']}" for b in aligned)
+
+
+def _do_paste_diarize(audio_path, paste_text, n_speakers_val, min_turn_sec):
+    if audio_path is None:
+        raise gr.Error("音声ファイルをアップロードしてください。")
+    if not paste_text or not paste_text.strip():
+        raise gr.Error("テキストを貼り付けてください。")
+
+    n_speakers = None
+    if n_speakers_val is not None:
+        n_speakers = max(2, int(n_speakers_val))
+
+    yield [], "⏳ 話者分離中（数分かかります）...", "", gr.update(visible=False), gr.update(visible=False), gr.update(visible=False), gr.update(choices=["全話者"], value="全話者")
+
+    try:
+        timeline = diarizer.diarize_standalone(audio_path, n_speakers=n_speakers, min_turn_sec=float(min_turn_sec or 2.0))
+    except (ValueError, ImportError) as e:
+        raise gr.Error(str(e)) from e
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise gr.Error(f"話者分離エラー: {type(e).__name__}: {e}") from e
+
+    aligned = diarizer.align_text_to_speakers(paste_text, timeline)
+    output = _aligned_to_text(aligned)
+    speakers = sorted({b["speaker"] for b in aligned})
+    df_data = [[spk, ""] for spk in speakers]
+    n_detected = len({t["speaker"] for t in timeline})
+
+    yield (
+        aligned,
+        f"✅ 完了（{n_detected}話者検出）",
+        output,
+        gr.update(value=df_data, visible=True),
+        gr.update(visible=True),
+        gr.update(visible=True),
+        gr.update(choices=["全話者"] + speakers, value="全話者"),
+    )
+
+
+def _do_paste_apply_speakers(aligned: list[dict], df):
+    rows = df.values.tolist() if hasattr(df, "values") else (df or [])
+    mapping = {
+        str(row[0]): str(row[1]).strip()
+        for row in rows
+        if len(row) >= 2 and row[0] and str(row[1]).strip()
+    }
+    updated = [{**b, "speaker": mapping.get(b["speaker"], b["speaker"])} for b in aligned]
+    new_speakers = sorted({b["speaker"] for b in updated})
+    return updated, _aligned_to_text(updated), gr.update(choices=["全話者"] + new_speakers, value="全話者", interactive=True)
+
+
+def _do_paste_filter(aligned: list[dict], speaker: str) -> str:
+    if not aligned or speaker == "全話者":
+        return _aligned_to_text(aligned)
+    return _aligned_to_text([b for b in aligned if b["speaker"] == speaker])
+
+
+def _do_paste_download(content: str):
+    if not content:
+        raise gr.Error("先に話者分離を実行してください。")
+    with tempfile.NamedTemporaryFile(suffix=".txt", delete=False, mode="w", encoding="utf-8") as tmp:
+        tmp.write(content)
+        return gr.update(value=tmp.name, visible=True)
+
+
 # ── UI 構築 ───────────────────────────────────────────────────────────────────
 
 def build_ui() -> gr.Blocks:
@@ -740,6 +810,87 @@ def build_ui() -> gr.Blocks:
                 download_docx_btn.click(fn=_download_docx, inputs=preview_box, outputs=download_file)
 
             # ── Tab 3 ──────────────────────────────────────────────────────
+            with gr.TabItem("📋 貼り付け転写"):
+                paste_aligned_state = gr.State([])
+
+                with gr.Row():
+                    with gr.Column(scale=1):
+                        paste_audio = gr.File(
+                            label="音声ファイル",
+                            file_types=["audio"],
+                            type="filepath",
+                        )
+                        paste_n_speakers = gr.Number(
+                            label="話者数（空欄で自動検出）",
+                            value=None,
+                            precision=0,
+                            minimum=2,
+                            maximum=20,
+                        )
+                        paste_min_turn = gr.Slider(
+                            label="最短ターン長（秒）— 短い誤検出を除去",
+                            minimum=0.0,
+                            maximum=5.0,
+                            value=2.0,
+                            step=0.5,
+                        )
+                        paste_btn = gr.Button("▶ 話者分離を実行", variant="primary")
+                    with gr.Column(scale=2):
+                        paste_text_input = gr.Textbox(
+                            label="文字起こしテキストを貼り付け",
+                            lines=15,
+                            placeholder="iOSボイスメモやその他の文字起こし結果をここに貼り付けてください",
+                        )
+
+                paste_status_md = gr.Markdown("")
+                paste_filter_dd = gr.Dropdown(
+                    label="話者で絞り込み",
+                    choices=["全話者"],
+                    value="全話者",
+                )
+                paste_result_box = gr.Textbox(
+                    label="話者付きテキスト",
+                    lines=20,
+                    interactive=False,
+                    placeholder="話者分離結果がここに表示されます",
+                )
+                paste_speakers_df = gr.Dataframe(
+                    headers=["話者", "名前"],
+                    datatype=["str", "str"],
+                    label="話者リネーム（名前を入力して「適用」）",
+                    interactive=True,
+                    visible=False,
+                )
+                paste_apply_btn = gr.Button("話者名を適用", visible=False)
+                paste_download_btn = gr.Button("📥 テキストをダウンロード", visible=False)
+                paste_download_file = gr.File(label="ダウンロード", visible=False)
+
+                paste_btn.click(
+                    fn=_do_paste_diarize,
+                    inputs=[paste_audio, paste_text_input, paste_n_speakers, paste_min_turn],
+                    outputs=[
+                        paste_aligned_state, paste_status_md, paste_result_box,
+                        paste_speakers_df, paste_apply_btn, paste_download_btn,
+                        paste_filter_dd,
+                    ],
+                )
+                paste_apply_btn.click(
+                    fn=_do_paste_apply_speakers,
+                    inputs=[paste_aligned_state, paste_speakers_df],
+                    outputs=[paste_aligned_state, paste_result_box, paste_filter_dd],
+                )
+                paste_filter_dd.change(
+                    fn=_do_paste_filter,
+                    inputs=[paste_aligned_state, paste_filter_dd],
+                    outputs=[paste_result_box],
+                )
+                paste_download_btn.click(
+                    fn=_do_paste_download,
+                    inputs=[paste_result_box],
+                    outputs=[paste_download_file],
+                )
+
+            # ── Tab 4 ──────────────────────────────────────────────────────
             with gr.TabItem("⚙️ 設定"):
                 _PRESET_URLS = {
                     "Ollama (localhost:11434)": "http://localhost:11434/v1",
