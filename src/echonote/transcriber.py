@@ -1,4 +1,4 @@
-"""転写モジュール — faster-whisper ラッパー。プラットフォーム統一出力を返す。"""
+"""転写モジュール — faster-whisper / Moonshine ラッパー。プラットフォーム統一出力を返す。"""
 
 from __future__ import annotations
 
@@ -32,6 +32,13 @@ _BEAM_SIZE_BY_TIER = {"light": 1, "standard": 3, "performance": 5}
 _BEAM_SIZE_DEFAULT = 3
 _INTER_CHUNK_SLEEP_SEC = 5
 
+# Moonshine
+_MOONSHINE_MODEL_REPO = "csukuangfj2/sherpa-onnx-moonshine-base-ja-quantized-2026-02-27"
+_MOONSHINE_MODEL_DIR = Path.home() / ".cache" / "echonote" / "moonshine-base-ja"
+_SILERO_VAD_REPO = "R4kSo1997/sherpa-onnx-silero-vad-v5"
+_SILERO_VAD_PATH = Path.home() / ".cache" / "echonote" / "silero_vad.onnx"
+_moonshine_cache: dict = {}  # recognizer のシングルトンキャッシュ
+
 
 def _get_cpu_threads() -> int:
     """CPU スレッド数を返す。ECHONOTE_CPU_THREADS 環境変数でオーバーライド可能。
@@ -43,6 +50,175 @@ def _get_cpu_threads() -> int:
         return int(env)
     physical = psutil.cpu_count(logical=False) or 2
     return max(1, physical // 2)
+
+
+def _clean_jp(text: str) -> str:
+    """sherpa-onnx がトークン間に挿入するスペースを除去して自然な日本語に整形する。
+
+    ASCII英数字の前後はスペースを保持し、日本語文字間のスペースのみ除去する。
+    """
+    tokens = text.split()
+    if not tokens:
+        return ""
+    buf = [tokens[0]]
+    for tok in tokens[1:]:
+        prev = buf[-1]
+        if not prev[-1].isascii() and not tok[0].isascii():
+            buf[-1] += tok
+        else:
+            buf.append(" " + tok)
+    return "".join(buf).strip()
+
+
+def _remove_repetitions(text: str) -> str:
+    """Moonshine の幻覚による繰り返しフレーズを除去する。
+
+    連続する同一パターン（2文字以上）を1回に圧縮する。
+    「バラバラバラ」→「バラ」、「そうか。そうか。そうか。」→「そうか。」
+    """
+    if not text:
+        return text
+
+    # 1文字の大量繰り返し（5回以上）を2回に圧縮: "あああああ" → "ああ"
+    text = re.sub(r"(.)\1{4,}", r"\1\1", text)
+
+    # 2文字以上のパターンの連続繰り返しを除去（最大30回試行）
+    for _ in range(30):
+        m = re.search(r"(.{2,}?)\1+", text)
+        if m:
+            text = text[: m.start()] + m.group(1) + text[m.end() :]
+        else:
+            break
+
+    return text.strip()
+
+
+def _ensure_moonshine_assets() -> tuple[Path, Path]:
+    """Moonshine モデルと Silero VAD モデルを返す。未DLなら自動ダウンロード。"""
+    from huggingface_hub import hf_hub_download, snapshot_download
+
+    _MOONSHINE_MODEL_DIR.mkdir(parents=True, exist_ok=True)
+    _SILERO_VAD_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    if not (_MOONSHINE_MODEL_DIR / "encoder_model.ort").exists():
+        print(f"[transcriber] Moonshine モデルをダウンロード中（初回のみ）...", flush=True)
+        snapshot_download(repo_id=_MOONSHINE_MODEL_REPO, local_dir=str(_MOONSHINE_MODEL_DIR))
+
+    if not _SILERO_VAD_PATH.exists():
+        print("[transcriber] Silero VAD モデルをダウンロード中（初回のみ）...", flush=True)
+        hf_hub_download(
+            repo_id=_SILERO_VAD_REPO,
+            filename="silero_vad.onnx",
+            local_dir=str(_SILERO_VAD_PATH.parent),
+        )
+
+    return _MOONSHINE_MODEL_DIR, _SILERO_VAD_PATH
+
+
+def _get_moonshine_recognizer():
+    """Moonshine recognizer をシングルトンとして返す。"""
+    import sherpa_onnx
+    if "recognizer" not in _moonshine_cache:
+        model_dir, _ = _ensure_moonshine_assets()
+        _moonshine_cache["recognizer"] = sherpa_onnx.OfflineRecognizer.from_moonshine_v2(
+            encoder=str(model_dir / "encoder_model.ort"),
+            decoder=str(model_dir / "decoder_model_merged.ort"),
+            tokens=str(model_dir / "tokens.txt"),
+            num_threads=_get_cpu_threads(),
+            provider="cpu",
+        )
+    return _moonshine_cache["recognizer"]
+
+
+def _stream_moonshine(
+    audio_path: str,
+    on_chunk: Callable[[int, int, float, float], None] | None = None,
+):
+    """Moonshine + Silero VAD で音声を転写し、セグメントを順次 yield する。"""
+    import numpy as np
+    import sherpa_onnx
+    import wave
+
+    _SR = 16_000
+    _VAD_WINDOW = 512  # Silero VAD の処理単位
+    # ONNX量子化モデルは約10秒超でエラーになるため7.5秒でハードクリップする
+    _MAX_SAMPLES = int(7.5 * _SR)
+
+    _, silero_path = _ensure_moonshine_assets()
+    recognizer = _get_moonshine_recognizer()
+
+    # 16kHz WAV に変換
+    tmp_wav = tempfile.mktemp(suffix=".wav")
+    try:
+        subprocess.run(
+            ["ffmpeg", "-y", "-i", audio_path,
+             "-ar", str(_SR), "-ac", "1", "-c:a", "pcm_s16le", tmp_wav],
+            capture_output=True, check=True,
+        )
+        with wave.open(tmp_wav) as wf:
+            frames = wf.readframes(wf.getnframes())
+            audio = np.frombuffer(frames, dtype=np.int16).astype(np.float32) / 32768.0
+    finally:
+        try:
+            os.unlink(tmp_wav)
+        except OSError:
+            pass
+
+    # Silero VAD で音声区間を検出
+    vad_config = sherpa_onnx.VadModelConfig(
+        silero_vad=sherpa_onnx.SileroVadModelConfig(
+            model=str(silero_path),
+            threshold=0.12,
+            min_silence_duration=1.2,
+            min_speech_duration=0.3,
+            max_speech_duration=8.5,
+        ),
+        sample_rate=_SR,
+    )
+    vad = sherpa_onnx.VoiceActivityDetector(vad_config, buffer_size_in_seconds=60)
+
+    speech_segments: list[tuple[int, np.ndarray]] = []
+
+    def _drain_vad() -> None:
+        while not vad.empty():
+            seg = vad.front
+            speech_segments.append((seg.start, np.array(seg.samples, dtype=np.float32)))
+            vad.pop()
+
+    for i in range(0, len(audio), _VAD_WINDOW):
+        chunk = audio[i : i + _VAD_WINDOW]
+        if len(chunk) < _VAD_WINDOW:
+            chunk = np.pad(chunk, (0, _VAD_WINDOW - len(chunk)))
+        vad.accept_waveform(chunk)
+        _drain_vad()  # バッファ溢れを防ぐため投入ごとにポップ
+
+    vad.flush()  # 末尾セグメントを確定（忘れると消失する）
+    _drain_vad()
+
+    # VADが max_speech_duration を超えるセグメントを返す場合があるため
+    # アプリ側で _MAX_SAMPLES でハードクリップして分割する
+    clipped: list[tuple[int, np.ndarray]] = []
+    for start_sample, samples in speech_segments:
+        offset = 0
+        while offset < len(samples):
+            clipped.append((start_sample + offset, samples[offset : offset + _MAX_SAMPLES]))
+            offset += _MAX_SAMPLES
+
+    total = len(clipped)
+    for idx, (start_sample, samples) in enumerate(clipped):
+        start_sec = start_sample / _SR
+        end_sec = start_sec + len(samples) / _SR
+
+        if on_chunk:
+            on_chunk(idx, total, start_sec / 60, end_sec / 60)
+
+        stream = recognizer.create_stream()
+        stream.accept_waveform(_SR, samples)
+        recognizer.decode_stream(stream)
+        text = _remove_repetitions(_clean_jp(stream.result.text.strip()))
+
+        if text:
+            yield {"start": start_sec, "end": end_sec, "text": text}
 
 
 def _check_ffmpeg() -> None:
@@ -259,14 +435,20 @@ def transcribe_stream(
     settings: Settings | None = None,
     on_chunk: Callable[[int, int, float, float], None] | None = None,
     chunk_minutes: int = 5,
+    engine: str = "whisper",
 ):
     """音声ファイルを転写し、セグメントを順次 yield する。
 
+    engine: "whisper"（デフォルト）または "moonshine"。
     on_chunk(idx, total, start_min, end_min): チャンク処理開始時に呼ばれるコールバック。
-    chunk_minutes: チャンク分割の長さ（分）。この長さを超える音声を自動分割する。
+    chunk_minutes: Whisper 使用時のチャンク分割長（分）。Moonshine 時は VAD が担うため無視。
     """
     _check_ffmpeg()
     audio_path = str(audio_path)
+
+    if engine == "moonshine":
+        yield from _stream_moonshine(audio_path, on_chunk=on_chunk)
+        return
 
     use_mlx = (
         sys.platform == "darwin"

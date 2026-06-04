@@ -13,6 +13,7 @@ from echonote import diarizer, exporter, llm, transcriber, trimmer
 
 _SETTINGS = cfg.load_settings()
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
+_OLLAMA_URL = "http://localhost:11434/v1"
 
 
 def _fmt_sec(sec: int) -> str:
@@ -184,7 +185,7 @@ def _model_cached(model_size: str) -> bool:
     return bool(glob.glob(pattern))
 
 
-def _do_transcribe(audio_path, model_size, language, do_diarize, chunk_minutes_str, trim_start, trim_end):
+def _do_transcribe(audio_path, engine, model_size, language, do_diarize, n_speakers_val, chunk_minutes_str, trim_start, trim_end):
     if audio_path is None:
         raise gr.Error("音声ファイルをアップロードしてください。")
 
@@ -195,15 +196,17 @@ def _do_transcribe(audio_path, model_size, language, do_diarize, chunk_minutes_s
     chunk_minutes = int(chunk_minutes_str.replace("分", ""))
     llm.try_unload(_SETTINGS.effective_llm_url(), _SETTINGS.effective_llm_model())
 
-    use_mlx = _SETTINGS.platform.value == "mac"
-    if use_mlx:
+    engine_key = "moonshine" if engine == "Moonshine" else "whisper"
+    if engine_key == "moonshine":
+        init_status = "⏳ Moonshine モデルを読み込み中（初回はダウンロードあり）..."
+    elif _SETTINGS.platform.value == "mac":
         init_status = "⏳ モデルを読み込み中..."
     elif not _model_cached(model_size):
         init_status = f"⬇️ faster-whisper/{model_size} モデルをダウンロード中（初回のみ）..."
     else:
         init_status = "⏳ モデルを読み込み中..."
 
-    yield [], "", gr.update(visible=False), gr.update(visible=False), init_status
+    yield [], "", gr.update(visible=False), gr.update(visible=False), init_status, gr.update(choices=["全話者"], value="全話者")
 
     status = {"text": "🔄 文字起こし中..."}
 
@@ -225,6 +228,7 @@ def _do_transcribe(audio_path, model_size, language, do_diarize, chunk_minutes_s
             settings=_SETTINGS,
             on_chunk=on_chunk,
             chunk_minutes=chunk_minutes,
+            engine=engine_key,
         ):
             segments.append(seg)
             yield (
@@ -233,6 +237,7 @@ def _do_transcribe(audio_path, model_size, language, do_diarize, chunk_minutes_s
                 gr.update(visible=False),
                 gr.update(visible=False),
                 status["text"],
+                gr.update(choices=["全話者"], value="全話者"),
             )
     except Exception as e:
         import traceback
@@ -241,13 +246,15 @@ def _do_transcribe(audio_path, model_size, language, do_diarize, chunk_minutes_s
 
     if not do_diarize:
         done = f"✅ 文字起こし完了（{len(segments)} セグメント）"
-        yield segments, exporter.segments_to_transcript(segments), gr.update(visible=False), gr.update(visible=False), done
+        yield segments, exporter.segments_to_transcript(segments), gr.update(visible=False), gr.update(visible=False), done, gr.update(choices=["全話者"], value="全話者")
         return
 
+    n_speakers = int(n_speakers_val) if n_speakers_val else None
+
     diarize_status = "⏳ 話者分離中（数分かかります）..."
-    yield segments, exporter.segments_to_transcript(segments), gr.update(visible=False), gr.update(visible=False), diarize_status
+    yield segments, exporter.segments_to_transcript(segments), gr.update(visible=False), gr.update(visible=False), diarize_status, gr.update(choices=["全話者"], value="全話者")
     try:
-        segments = diarizer.diarize(audio_path, _SETTINGS.effective_hf_token(), segments)
+        segments = diarizer.diarize(audio_path, _SETTINGS.effective_hf_token(), segments, n_speakers=n_speakers)
     except (ValueError, ImportError) as e:
         raise gr.Error(str(e)) from e
     except Exception as e:
@@ -264,6 +271,7 @@ def _do_transcribe(audio_path, model_size, language, do_diarize, chunk_minutes_s
         gr.update(value=df_data, visible=True),
         gr.update(visible=True),
         done,
+        gr.update(choices=["全話者"] + speakers, value="全話者"),
     )
 
 
@@ -278,7 +286,15 @@ def _do_apply_speakers(segments: list[dict], df):
         {**seg, "speaker": mapping.get(seg.get("speaker", ""), seg.get("speaker", ""))}
         for seg in segments
     ]
-    return updated, exporter.segments_to_transcript(updated)
+    new_speakers = sorted({s.get("speaker", "") for s in updated if s.get("speaker")})
+    return updated, exporter.segments_to_transcript(updated), gr.update(choices=["全話者"] + new_speakers, value="全話者")
+
+
+def _do_filter_transcript(segments: list[dict], speaker: str) -> str:
+    if not segments or speaker == "全話者":
+        return exporter.segments_to_transcript(segments)
+    filtered = [s for s in segments if s.get("speaker") == speaker]
+    return exporter.segments_to_transcript(filtered)
 
 
 # ── セクション検出ヘルパー ───────────────────────────────────────────────────────
@@ -444,7 +460,7 @@ def _do_download_md(content: str):
         raise gr.Error("先に記録を生成してください。")
     with tempfile.NamedTemporaryFile(suffix=".md", delete=False, mode="w", encoding="utf-8") as tmp:
         tmp.write(content)
-        return tmp.name
+        return gr.update(value=tmp.name, visible=True)
 
 
 def _do_download_docx(content: str):
@@ -453,7 +469,7 @@ def _do_download_docx(content: str):
     data = exporter.to_docx(content)
     with tempfile.NamedTemporaryFile(suffix=".docx", delete=False, mode="wb") as tmp:
         tmp.write(data)
-        return tmp.name
+        return gr.update(value=tmp.name, visible=True)
 
 
 # ── Tab 3: 貼り付け転写 ───────────────────────────────────────────────────────
@@ -472,15 +488,13 @@ def _do_paste_diarize(audio_path, paste_text, n_speakers_val, min_turn_sec):
     if n_speakers_val is not None:
         n_speakers = max(2, int(n_speakers_val))
 
-    yield [], "⏳ 話者分離中（数分かかります）...", "", gr.update(visible=False), gr.update(visible=False), gr.update(visible=False), gr.update(choices=["全話者"], value="全話者")
+    yield [], "⏳ 話者分離中（数分かかります）...", "", gr.update(visible=False), gr.update(visible=False), gr.update(visible=False), gr.update(choices=["全話者"], value="全話者"), gr.update(visible=False)
 
     try:
         timeline = diarizer.diarize_standalone(audio_path, n_speakers=n_speakers, min_turn_sec=float(min_turn_sec or 2.0))
     except (ValueError, ImportError) as e:
         raise gr.Error(str(e)) from e
     except Exception as e:
-        import traceback
-        traceback.print_exc()
         raise gr.Error(f"話者分離エラー: {type(e).__name__}: {e}") from e
 
     aligned = diarizer.align_text_to_speakers(paste_text, timeline)
@@ -497,6 +511,7 @@ def _do_paste_diarize(audio_path, paste_text, n_speakers_val, min_turn_sec):
         gr.update(visible=True),
         gr.update(visible=True),
         gr.update(choices=["全話者"] + speakers, value="全話者"),
+        gr.update(visible=True),
     )
 
 
@@ -518,12 +533,51 @@ def _do_paste_filter(aligned: list[dict], speaker: str) -> str:
     return _aligned_to_text([b for b in aligned if b["speaker"] == speaker])
 
 
+def _do_paste_refine(aligned: list[dict], llm_url: str, llm_model: str):
+    if not aligned:
+        raise gr.Error("先に話者分離を実行してください。")
+    try:
+        updated = diarizer.refine_speakers_with_llm(aligned, llm_url, llm_model)
+    except Exception as e:
+        raise gr.Error(f"LLM補正エラー: {e}") from e
+    new_speakers = sorted({b["speaker"] for b in updated})
+    df_data = [[spk, ""] for spk in new_speakers]
+    return (
+        updated,
+        _aligned_to_text(updated),
+        gr.update(value=df_data, visible=True),
+        gr.update(choices=["全話者"] + new_speakers, value="全話者"),
+    )
+
+
 def _do_paste_download(content: str):
     if not content:
         raise gr.Error("先に話者分離を実行してください。")
     with tempfile.NamedTemporaryFile(suffix=".txt", delete=False, mode="w", encoding="utf-8") as tmp:
         tmp.write(content)
         return gr.update(value=tmp.name, visible=True)
+
+
+def _detect_ollama():
+    try:
+        import requests as _req
+        resp = _req.get("http://localhost:11434/api/tags", timeout=5)
+        if resp.status_code == 200:
+            if models := [m["name"] for m in resp.json().get("models", [])]:
+                return gr.update(choices=models, value=models[0]), "✅ Ollama が見つかりました。"
+            return gr.update(), "⚠️ Ollama は起動していますがモデルがありません。"
+    except Exception:
+        pass
+    return gr.update(), "⚠️ Ollama が見つかりません。インストールされているか確認してください。"
+
+
+def _apply_settings(model, token):
+    _SETTINGS.ui_overrides["llm_url"] = _OLLAMA_URL
+    _SETTINGS.ui_overrides["llm_model"] = model
+    _SETTINGS.ui_overrides["hf_token"] = token
+    reachable = llm.check_endpoint(_OLLAMA_URL)
+    status = "✅ 設定を保存しました。" if reachable else "✅ 設定を保存しました。（Ollama はオフライン）"
+    return _OLLAMA_URL, model, status
 
 
 # ── UI 構築 ───────────────────────────────────────────────────────────────────
@@ -567,6 +621,11 @@ def build_ui() -> gr.Blocks:
                         )
                         trim_info_md = gr.Markdown("")
                     with gr.Column(scale=1):
+                        engine_radio = gr.Radio(
+                            label="エンジン",
+                            choices=["Whisper", "Moonshine"],
+                            value="Whisper",
+                        )
                         model_dd = gr.Dropdown(
                             label="Whisper モデル",
                             choices=transcriber.WHISPER_MODELS,
@@ -580,6 +639,14 @@ def build_ui() -> gr.Blocks:
                         diarize_chk = gr.Checkbox(
                             label="話者分離を実行（HF トークン必須）",
                             value=False,
+                        )
+                        diarize_n_speakers = gr.Number(
+                            label="話者数（空欄で自動検出）",
+                            value=None,
+                            precision=0,
+                            minimum=2,
+                            maximum=20,
+                            info="参加者全員の人数を入力（ほぼ聞くだけの参加者も含む）",
                         )
                         chunk_dd = gr.Dropdown(
                             label="チャンク分割（長音声OOM対策）",
@@ -600,6 +667,11 @@ def build_ui() -> gr.Blocks:
                     "📋 タイムスタンプなしでコピー", size="sm", variant="secondary",
                 )
 
+                filter_speaker_dd = gr.Dropdown(
+                    label="話者で絞り込み",
+                    choices=["全話者"],
+                    value="全話者",
+                )
                 speakers_df = gr.Dataframe(
                     headers=["話者", "名前"],
                     datatype=["str", "str"],
@@ -676,15 +748,25 @@ def build_ui() -> gr.Blocks:
                     inputs=[trim_start_num, trim_end_num, duration_state],
                     outputs=trim_info_md,
                 )
+                engine_radio.change(
+                    fn=lambda e: (gr.update(visible=e == "Whisper"), gr.update(visible=e == "Whisper")),
+                    inputs=[engine_radio],
+                    outputs=[model_dd, chunk_dd],
+                )
                 transcribe_btn.click(
                     fn=_do_transcribe,
-                    inputs=[audio_input, model_dd, lang_dd, diarize_chk, chunk_dd, trim_start_num, trim_end_num],
-                    outputs=[segments_state, transcript_box, speakers_df, apply_speakers_btn, status_md],
+                    inputs=[audio_input, engine_radio, model_dd, lang_dd, diarize_chk, diarize_n_speakers, chunk_dd, trim_start_num, trim_end_num],
+                    outputs=[segments_state, transcript_box, speakers_df, apply_speakers_btn, status_md, filter_speaker_dd],
                 )
                 apply_speakers_btn.click(
                     fn=_do_apply_speakers,
                     inputs=[segments_state, speakers_df],
-                    outputs=[segments_state, transcript_box],
+                    outputs=[segments_state, transcript_box, filter_speaker_dd],
+                )
+                filter_speaker_dd.change(
+                    fn=_do_filter_transcript,
+                    inputs=[segments_state, filter_speaker_dd],
+                    outputs=[transcript_box],
                 )
                 copy_no_ts_btn.click(
                     fn=None,
@@ -798,16 +880,8 @@ def build_ui() -> gr.Blocks:
                     outputs=preview_box,
                 )
 
-                def _download_md(content):
-                    path = _do_download_md(content)
-                    return gr.update(value=path, visible=True)
-
-                def _download_docx(content):
-                    path = _do_download_docx(content)
-                    return gr.update(value=path, visible=True)
-
-                download_md_btn.click(fn=_download_md, inputs=preview_box, outputs=download_file)
-                download_docx_btn.click(fn=_download_docx, inputs=preview_box, outputs=download_file)
+                download_md_btn.click(fn=_do_download_md, inputs=preview_box, outputs=download_file)
+                download_docx_btn.click(fn=_do_download_docx, inputs=preview_box, outputs=download_file)
 
             # ── Tab 3 ──────────────────────────────────────────────────────
             with gr.TabItem("📋 貼り付け転写"):
@@ -862,6 +936,7 @@ def build_ui() -> gr.Blocks:
                     visible=False,
                 )
                 paste_apply_btn = gr.Button("話者名を適用", visible=False)
+                paste_refine_btn = gr.Button("✨ LLMで話者名を補正", visible=False, variant="secondary")
                 paste_download_btn = gr.Button("📥 テキストをダウンロード", visible=False)
                 paste_download_file = gr.File(label="ダウンロード", visible=False)
 
@@ -871,13 +946,18 @@ def build_ui() -> gr.Blocks:
                     outputs=[
                         paste_aligned_state, paste_status_md, paste_result_box,
                         paste_speakers_df, paste_apply_btn, paste_download_btn,
-                        paste_filter_dd,
+                        paste_filter_dd, paste_refine_btn,
                     ],
                 )
                 paste_apply_btn.click(
                     fn=_do_paste_apply_speakers,
                     inputs=[paste_aligned_state, paste_speakers_df],
                     outputs=[paste_aligned_state, paste_result_box, paste_filter_dd],
+                )
+                paste_refine_btn.click(
+                    fn=_do_paste_refine,
+                    inputs=[paste_aligned_state, llm_url_state, llm_model_state],
+                    outputs=[paste_aligned_state, paste_result_box, paste_speakers_df, paste_filter_dd],
                 )
                 paste_filter_dd.change(
                     fn=_do_paste_filter,
@@ -892,33 +972,14 @@ def build_ui() -> gr.Blocks:
 
             # ── Tab 4 ──────────────────────────────────────────────────────
             with gr.TabItem("⚙️ 設定"):
-                _PRESET_URLS = {
-                    "Ollama (localhost:11434)": "http://localhost:11434/v1",
-                    "mlx-lm (localhost:8080)": "http://localhost:8080/v1",
-                }
-                _current_url = settings.effective_llm_url()
-                _preset_label = next(
-                    (k for k, v in _PRESET_URLS.items() if v == _current_url),
-                    list(_PRESET_URLS.keys())[0],
-                )
-
-                endpoint_radio = gr.Radio(
-                    label="LLM エンドポイント",
-                    choices=list(_PRESET_URLS.keys()),
-                    value=_preset_label,
-                )
-                llm_url_input = gr.Textbox(
-                    label="エンドポイント URL（直接編集可）",
-                    value=_current_url,
-                )
                 with gr.Row():
                     llm_model_input = gr.Dropdown(
-                        label="LLM モデル名",
+                        label="LLM モデル",
                         choices=[settings.effective_llm_model()],
                         value=settings.effective_llm_model(),
                         allow_custom_value=True,
                     )
-                    fetch_models_btn = gr.Button("一覧を取得", scale=0, size="sm")
+                    detect_ollama_btn = gr.Button("Ollama を検出する", scale=0, size="sm")
                 hf_token_input = gr.Textbox(
                     label="HuggingFace トークン（話者分離用）",
                     value=settings.effective_hf_token(),
@@ -927,49 +988,13 @@ def build_ui() -> gr.Blocks:
                 save_btn = gr.Button("設定を適用", variant="secondary")
                 save_status = gr.Markdown("")
 
-                def _on_endpoint_radio(choice):
-                    preset = {
-                        "Ollama (localhost:11434)": "http://localhost:11434/v1",
-                        "mlx-lm (localhost:8080)": "http://localhost:8080/v1",
-                    }
-                    return preset.get(choice, "")
-
-                def _fetch_models(url):
-                    try:
-                        import requests as _req
-                        host = url.rstrip("/")
-                        if host.endswith("/v1"):
-                            host = host[:-3]
-                        resp = _req.get(f"{host}/api/tags", timeout=5)
-                        if resp.status_code == 200:
-                            models = [m["name"] for m in resp.json().get("models", [])]
-                            if models:
-                                return gr.update(choices=models), "✅ モデル一覧を取得しました。"
-                    except Exception:
-                        pass
-                    return gr.update(), "⚠️ モデル一覧の取得に失敗しました。"
-
-                def _apply_settings(url, model, token):
-                    _SETTINGS.ui_overrides["llm_url"] = url
-                    _SETTINGS.ui_overrides["llm_model"] = model
-                    _SETTINGS.ui_overrides["hf_token"] = token
-                    reachable = llm.check_endpoint(url)
-                    status = "✅ LLM サーバーに接続できました。" if reachable else "⚠️ LLM サーバーに接続できません。"
-                    return url, model, status
-
-                endpoint_radio.change(
-                    fn=_on_endpoint_radio,
-                    inputs=endpoint_radio,
-                    outputs=llm_url_input,
-                )
-                fetch_models_btn.click(
-                    fn=_fetch_models,
-                    inputs=llm_url_input,
+                detect_ollama_btn.click(
+                    fn=_detect_ollama,
                     outputs=[llm_model_input, save_status],
                 )
                 save_btn.click(
                     fn=_apply_settings,
-                    inputs=[llm_url_input, llm_model_input, hf_token_input],
+                    inputs=[llm_model_input, hf_token_input],
                     outputs=[llm_url_state, llm_model_state, save_status],
                 )
 
