@@ -24,6 +24,7 @@ diarization = [
     "resemblyzer",
     "pyannote-audio>=3.0",
     "webrtcvad-wheels",
+    "scikit-learn",
 ]
 
 [build-system]
