@@ -23,6 +23,7 @@ mac = [
 diarization = [
     "resemblyzer",
     "pyannote-audio>=3.0",
+    "webrtcvad-wheels",
 ]
 
 [build-system]

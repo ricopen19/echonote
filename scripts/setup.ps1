@@ -64,6 +64,7 @@ try {
     Write-Host "  uv: OK" -ForegroundColor Green
 
     uv sync
+    uv pip install --extra diarization
     Write-Host "  packages: OK" -ForegroundColor Green
 
     # --- Step 4: Download Ollama model ---
