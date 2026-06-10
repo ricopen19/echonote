@@ -7,17 +7,52 @@ import gc
 from pathlib import Path
 
 _CLUSTER_THRESHOLD = 0.45  # AgglomerativeClustering の cosine 距離閾値
+_MERGE_MIN_SEC = 2.0        # これ未満のセグメントは直前に結合してからembeddingを計算する
 
 
-# ── resemblyzer ───────────────────────────────────────────────────────────────
-
-def _diarize_resemblyzer(audio_path: str, segments: list[dict]) -> list[dict]:
+def _ensure_pkg_resources() -> None:
     import sys, types
-    # webrtcvad が pkg_resources.get_distribution を version 取得にのみ使うため、uv 環境向けにスタブを注入
     if "pkg_resources" not in sys.modules:
         _stub = types.ModuleType("pkg_resources")
         _stub.get_distribution = lambda name: type("D", (), {"version": "0.0.0"})()
         sys.modules["pkg_resources"] = _stub
+
+
+def _embed_segments(wav, sr: int, segs: list[dict], encoder) -> tuple[list, list[int]]:
+    embeddings: list = []
+    valid_indices: list[int] = []
+    for i, seg in enumerate(segs):
+        chunk = wav[int(seg["start"] * sr) : int(seg["end"] * sr)]
+        if len(chunk) >= int(sr * 0.5):
+            embeddings.append(encoder.embed_utterance(chunk))
+            valid_indices.append(i)
+    return embeddings, valid_indices
+
+
+def _merge_short_segments(segments: list[dict]) -> tuple[list[dict], list[int]]:
+    """2秒未満のセグメントを直前のセグメントに結合する。
+
+    Returns:
+        merged: 結合後セグメントリスト
+        origin_to_merged: 元インデックス → 結合後インデックスのマッピング
+    """
+    merged: list[dict] = []
+    origin_to_merged: list[int] = []
+    for seg in segments:
+        dur = seg["end"] - seg["start"]
+        if dur < _MERGE_MIN_SEC and merged:
+            merged[-1] = {**merged[-1], "end": seg["end"]}
+            origin_to_merged.append(len(merged) - 1)
+        else:
+            origin_to_merged.append(len(merged))
+            merged.append({"start": seg["start"], "end": seg["end"]})
+    return merged, origin_to_merged
+
+
+# ── resemblyzer ───────────────────────────────────────────────────────────────
+
+def _diarize_resemblyzer(audio_path: str, segments: list[dict], n_speakers: int | None = None) -> list[dict]:
+    _ensure_pkg_resources()
     from resemblyzer import VoiceEncoder, preprocess_wav
     import numpy as np
     from sklearn.cluster import AgglomerativeClustering
@@ -26,14 +61,8 @@ def _diarize_resemblyzer(audio_path: str, segments: list[dict]) -> list[dict]:
     sr = 16_000
     encoder = VoiceEncoder("cpu")
 
-    embeddings: list = []
-    valid_indices: list[int] = []
-    for i, seg in enumerate(segments):
-        chunk = wav[int(seg["start"] * sr) : int(seg["end"] * sr)]
-        if len(chunk) < int(sr * 0.5):
-            continue
-        embeddings.append(encoder.embed_utterance(chunk))
-        valid_indices.append(i)
+    merged_segs, origin_to_merged = _merge_short_segments(segments)
+    embeddings, valid_merged_indices = _embed_segments(wav, sr, merged_segs, encoder)
 
     if not embeddings:
         return [{**seg, "speaker": "SPEAKER_00"} for seg in segments]
@@ -41,6 +70,11 @@ def _diarize_resemblyzer(audio_path: str, segments: list[dict]) -> list[dict]:
     arr = np.array(embeddings)
     if len(arr) == 1:
         raw_labels = [0]
+    elif n_speakers is not None:
+        k = min(max(2, n_speakers), len(arr))
+        raw_labels = AgglomerativeClustering(
+            n_clusters=k, metric="cosine", linkage="average"
+        ).fit_predict(arr).tolist()
     else:
         raw_labels = AgglomerativeClustering(
             n_clusters=None,
@@ -49,15 +83,17 @@ def _diarize_resemblyzer(audio_path: str, segments: list[dict]) -> list[dict]:
             linkage="average",
         ).fit_predict(arr).tolist()
 
+    # 結合後インデックス → 話者名
     label_map: dict[int, str] = {}
-    seg_speakers: dict[int, str] = {}
-    for idx, label in zip(valid_indices, raw_labels):
+    merged_speakers: dict[int, str] = {}
+    for merged_idx, label in zip(valid_merged_indices, raw_labels):
         if label not in label_map:
             label_map[label] = f"SPEAKER_{len(label_map):02d}"
-        seg_speakers[idx] = label_map[label]
+        merged_speakers[merged_idx] = label_map[label]
 
+    # 元セグメントへ逆マッピング
     return [
-        {**seg, "speaker": seg_speakers.get(i, "SPEAKER_00")}
+        {**seg, "speaker": merged_speakers.get(origin_to_merged[i], "SPEAKER_00")}
         for i, seg in enumerate(segments)
     ]
 
@@ -152,6 +188,7 @@ def diarize(
     audio_path: str | Path,
     hf_token: str,
     segments: list[dict],
+    n_speakers: int | None = None,
 ) -> list[dict]:
     """話者分離を実行し、各セグメントに speaker キーを付加して返す。
 
@@ -162,7 +199,7 @@ def diarize(
 
     try:
         import resemblyzer  # noqa: F401
-        return _diarize_resemblyzer(audio_path, segments)
+        return _diarize_resemblyzer(audio_path, segments, n_speakers=n_speakers)
     except ImportError:
         pass
 
@@ -228,14 +265,7 @@ def diarize_standalone(
     Returns:
         [{"start": float, "end": float, "speaker": str}, ...]
     """
-    import sys
-    import types
-
-    if "pkg_resources" not in sys.modules:
-        _stub = types.ModuleType("pkg_resources")
-        _stub.get_distribution = lambda name: type("D", (), {"version": "0.0.0"})()
-        sys.modules["pkg_resources"] = _stub
-
+    _ensure_pkg_resources()
     import numpy as np
     import webrtcvad
     from resemblyzer import VoiceEncoder, preprocess_wav
@@ -270,15 +300,8 @@ def diarize_standalone(
     if not raw_segs:
         return [{"start": 0.0, "end": duration, "speaker": "SPEAKER_00"}]
 
-    # Embeddings
     encoder = VoiceEncoder("cpu")
-    embeddings: list = []
-    valid_indices: list[int] = []
-    for i, seg in enumerate(raw_segs):
-        chunk = wav[int(seg["start"] * sr) : int(seg["end"] * sr)]
-        if len(chunk) >= int(sr * 0.5):
-            embeddings.append(encoder.embed_utterance(chunk))
-            valid_indices.append(i)
+    embeddings, valid_indices = _embed_segments(wav, sr, raw_segs, encoder)
 
     if not embeddings:
         return [{"start": s["start"], "end": s["end"], "speaker": "SPEAKER_00"} for s in raw_segs]
@@ -357,6 +380,63 @@ def diarize_standalone(
         for i, seg in enumerate(raw_segs)
     ]
     return _smooth_turns(timeline, min_turn_sec)
+
+
+_REFINE_SAMPLE_BLOCKS = 30  # LLMに送る先頭ブロック数
+
+
+def refine_speakers_with_llm(
+    aligned: list[dict],
+    llm_url: str,
+    llm_model: str,
+) -> list[dict]:
+    """LLMを使って SPEAKER_XX ラベルを実名に補正する。
+
+    会話の先頭ブロックから名前の呼びかけを検出し、
+    {"SPEAKER_00": "田中", ...} のマッピングを生成して適用する。
+    LLM が未起動・パース失敗の場合は元の aligned をそのまま返す。
+    """
+    import json as _json
+    import re as _re
+    from echonote import llm as _llm
+
+    if not aligned:
+        return aligned
+
+    speakers = sorted({b["speaker"] for b in aligned})
+    sample = aligned[:_REFINE_SAMPLE_BLOCKS]
+    dialogue = "\n".join(f"[{b['speaker']}] {b['text'][:200]}" for b in sample)
+
+    prompt = f"""以下は会議の文字起こしです。話者ラベル（SPEAKER_XX）が付いています。
+会話の内容から各話者の実際の名前を推定してください。
+名前が会話中に登場しない話者は SPEAKER_XX のままにしてください。
+
+話者一覧: {', '.join(speakers)}
+
+会話（先頭抜粋）:
+{dialogue}
+
+以下のJSON形式のみで回答してください（他のテキストは不要）:
+{{"SPEAKER_00": "名前または SPEAKER_00", "SPEAKER_01": "名前または SPEAKER_01"}}"""
+
+    try:
+        response = "".join(_llm.complete(prompt, base_url=llm_url, model=llm_model, stream=True))
+    except (_llm.LLMConnectionError, _llm.LLMError):
+        return aligned
+
+    match = _re.search(r'\{[^{}]+\}', response, _re.DOTALL)
+    if not match:
+        return aligned
+
+    try:
+        mapping: dict[str, str] = _json.loads(match.group())
+    except _json.JSONDecodeError:
+        return aligned
+
+    return [
+        {**b, "speaker": mapping.get(b["speaker"], b["speaker"])}
+        for b in aligned
+    ]
 
 
 def align_text_to_speakers(
