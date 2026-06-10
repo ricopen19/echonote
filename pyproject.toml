@@ -26,6 +26,10 @@ diarization = [
     "webrtcvad-wheels",
     "scikit-learn",
 ]
+moonshine = [
+    "sherpa-onnx",
+    "huggingface_hub",
+]
 
 [build-system]
 requires = ["hatchling"]

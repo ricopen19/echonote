@@ -63,12 +63,12 @@ try {
     python -m pip install uv --quiet
     Write-Host "  uv: OK" -ForegroundColor Green
 
-    uv sync --extra diarization
+    uv sync --extra diarization --extra moonshine
     Write-Host "  packages: OK" -ForegroundColor Green
 
     # --- Step 4: Download Ollama model ---
     Write-Host ""
-    Write-Host "Step 4/4: Download AI model (approx. 2.5GB)" -ForegroundColor Yellow
+    Write-Host "Step 4/5: Download AI model (approx. 2.5GB)" -ForegroundColor Yellow
     Write-Host ""
     Write-Host "  This downloads the AI model needed for summarization." -ForegroundColor White
     Write-Host "  It may take several minutes depending on your connection." -ForegroundColor Gray
@@ -80,6 +80,23 @@ try {
         Write-Host "  model: OK" -ForegroundColor Green
     } else {
         Write-Host "  Skipped. Run 'ollama pull qwen3:4b-q4_K_M' later." -ForegroundColor Yellow
+    }
+
+    # --- Step 5: Download Moonshine model ---
+    Write-Host ""
+    Write-Host "Step 5/5: Download Moonshine speech recognition model (approx. 200MB)" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "  Moonshine is a lightweight transcription engine." -ForegroundColor White
+    Write-Host "  Recommended for low-spec PCs (faster than Whisper)." -ForegroundColor White
+    Write-Host "  It may take several minutes depending on your connection." -ForegroundColor Gray
+    Write-Host ""
+    $answer = Read-Host "  Download now? [y/N]"
+    if ($answer -match "^[yY]$") {
+        Write-Host "  Downloading..." -ForegroundColor Cyan
+        uv run python -c "from echonote.transcriber import _ensure_moonshine_assets; _ensure_moonshine_assets()"
+        Write-Host "  Moonshine model: OK" -ForegroundColor Green
+    } else {
+        Write-Host "  Skipped. The model will be downloaded automatically on first use." -ForegroundColor Yellow
     }
 
     # --- Done ---

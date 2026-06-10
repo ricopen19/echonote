@@ -9,6 +9,6 @@ echo Waiting for Ollama...
 timeout /t 4 /nobreak > nul
 
 echo Starting Echonote...
-uv run --extra diarization echonote
+uv run --extra diarization --extra moonshine echonote
 
 pause
