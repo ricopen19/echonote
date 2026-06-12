@@ -39,6 +39,16 @@ _SILERO_VAD_REPO = "R4kSo1997/sherpa-onnx-silero-vad-v5"
 _SILERO_VAD_PATH = Path.home() / ".cache" / "echonote" / "silero_vad.onnx"
 _moonshine_cache: dict = {}  # recognizer のシングルトンキャッシュ
 
+# Windows: システム環境の古い ORT DLL が sherpa-onnx に混入するのを防ぐため
+# venv の onnxruntime capi を PE ローダーの検索パスに明示的に追加する。
+if sys.platform == "win32":
+    try:
+        import onnxruntime as _ort
+        os.add_dll_directory(str(Path(_ort.__file__).parent / "capi"))
+        del _ort
+    except Exception:
+        pass
+
 
 def _get_cpu_threads() -> int:
     """CPU スレッド数を返す。ECHONOTE_CPU_THREADS 環境変数でオーバーライド可能。
