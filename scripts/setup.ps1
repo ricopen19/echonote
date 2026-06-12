@@ -66,20 +66,6 @@ try {
     uv sync --extra diarization --extra moonshine
     Write-Host "  packages: OK" -ForegroundColor Green
 
-    # sherpa-onnx がバンドルする古い ORT を Python onnxruntime パッケージの新しい DLL で
-    # 上書きする。これにより Moonshine モデルが要求する ORT API v24 が使えるようになる。
-    $sherpaDir = (uv run python -c "import sherpa_onnx, os; print(os.path.dirname(sherpa_onnx.__file__))").Trim()
-    $ortCapiDir = (uv run python -c "import onnxruntime, os; print(os.path.join(os.path.dirname(onnxruntime.__file__), 'capi'))").Trim()
-    $systemOrtDll = Join-Path $ortCapiDir "onnxruntime.dll"
-    $sherpaOrtDll = Get-ChildItem -Path $sherpaDir -Filter "onnxruntime.dll" -Recurse -ErrorAction SilentlyContinue |
-        Select-Object -First 1 -ExpandProperty FullName
-    if ($sherpaOrtDll -and (Test-Path $systemOrtDll)) {
-        Copy-Item $systemOrtDll $sherpaOrtDll -Force
-        Write-Host "  ORT DLL patched for Moonshine: OK" -ForegroundColor Green
-    } else {
-        Write-Host "  ORT DLL patch skipped (sherpa=$sherpaDir, ort=$systemOrtDll)" -ForegroundColor Yellow
-    }
-
     # --- Step 4: Download Ollama model ---
     Write-Host ""
     Write-Host "Step 4/5: Download AI model (approx. 800MB)" -ForegroundColor Yellow
