@@ -68,7 +68,7 @@ try {
 
     # --- Step 4: Download Ollama model ---
     Write-Host ""
-    Write-Host "Step 4/5: Download AI model (approx. 2.5GB)" -ForegroundColor Yellow
+    Write-Host "Step 4/5: Download AI model (approx. 5GB)" -ForegroundColor Yellow
     Write-Host ""
     Write-Host "  This downloads the AI model needed for summarization." -ForegroundColor White
     Write-Host "  It may take several minutes depending on your connection." -ForegroundColor Gray
@@ -76,10 +76,10 @@ try {
     $answer = Read-Host "  Download now? [y/N]"
     if ($answer -match "^[yY]$") {
         Write-Host "  Downloading..." -ForegroundColor Cyan
-        ollama pull qwen3:4b-q4_K_M
+        ollama pull lfm2.5:8b-a1b-q4_k_m
         Write-Host "  model: OK" -ForegroundColor Green
     } else {
-        Write-Host "  Skipped. Run 'ollama pull qwen3:4b-q4_K_M' later." -ForegroundColor Yellow
+        Write-Host "  Skipped. Run 'ollama pull lfm2.5:8b-a1b-q4_k_m' later." -ForegroundColor Yellow
     }
 
     # --- Step 5: Download Moonshine model ---

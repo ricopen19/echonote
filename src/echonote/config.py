@@ -36,7 +36,7 @@ _DEFAULT_LLM_URL = {
 
 _DEFAULT_LLM_MODEL = {
     HWTier.LIGHT: "qwen3:1.7b",
-    HWTier.STANDARD: "qwen3:4b-q4_K_M",
+    HWTier.STANDARD: "lfm2.5:8b-a1b-q4_k_m",
     HWTier.PERFORMANCE: "qwen3:14b-q4_K_M",
 }
 
