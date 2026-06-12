@@ -71,13 +71,13 @@ try {
     $sherpaDir = (uv run python -c "import sherpa_onnx, os; print(os.path.dirname(sherpa_onnx.__file__))").Trim()
     $ortCapiDir = (uv run python -c "import onnxruntime, os; print(os.path.join(os.path.dirname(onnxruntime.__file__), 'capi'))").Trim()
     $systemOrtDll = Join-Path $ortCapiDir "onnxruntime.dll"
-    $candidates = @((Join-Path $sherpaDir "onnxruntime.dll"), (Join-Path $sherpaDir "lib\onnxruntime.dll"))
-    $sherpaOrtDll = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+    $sherpaOrtDll = Get-ChildItem -Path $sherpaDir -Filter "onnxruntime.dll" -Recurse -ErrorAction SilentlyContinue |
+        Select-Object -First 1 -ExpandProperty FullName
     if ($sherpaOrtDll -and (Test-Path $systemOrtDll)) {
         Copy-Item $systemOrtDll $sherpaOrtDll -Force
         Write-Host "  ORT DLL patched for Moonshine: OK" -ForegroundColor Green
     } else {
-        Write-Host "  ORT DLL patch skipped (DLL not found)" -ForegroundColor Yellow
+        Write-Host "  ORT DLL patch skipped (sherpa=$sherpaDir, ort=$systemOrtDll)" -ForegroundColor Yellow
     }
 
     # --- Step 4: Download Ollama model ---
