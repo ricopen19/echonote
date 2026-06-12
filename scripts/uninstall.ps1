@@ -17,7 +17,7 @@ try {
     Write-Host "以下を削除します:" -ForegroundColor White
     Write-Host "  - Python 仮想環境 (.venv)" -ForegroundColor Gray
     Write-Host "  - Whisper モデルキャッシュ (~/.cache/huggingface)" -ForegroundColor Gray
-    Write-Host "  - Ollama モデル (lfm2.5:8b-a1b-q4_k_m)" -ForegroundColor Gray
+    Write-Host "  - Ollama モデル (hf.co/LiquidAI/LFM2.5-1.2B-JP-202606-GGUF:Q4_K_M)" -ForegroundColor Gray
     Write-Host ""
     Write-Host "続けますか？ [y/N]" -ForegroundColor Yellow -NoNewline
     $confirm = Read-Host " "
@@ -65,11 +65,11 @@ try {
     Write-Host "Step 3/3: Ollama モデルを削除中..." -ForegroundColor Yellow
     if (Get-Command ollama -ErrorAction SilentlyContinue) {
         $ollamaList = ollama list 2>&1
-        if ($ollamaList -match "lfm2.5:8b-a1b-q4_k_m") {
-            ollama rm lfm2.5:8b-a1b-q4_k_m 2>&1 | Out-Null
-            Write-Host "  lfm2.5:8b-a1b-q4_k_m: 削除完了" -ForegroundColor Green
+        if ($ollamaList -match "LFM2.5-1.2B-JP-202606") {
+            ollama rm hf.co/LiquidAI/LFM2.5-1.2B-JP-202606-GGUF:Q4_K_M 2>&1 | Out-Null
+            Write-Host "  LFM2.5-1.2B-JP-202606: 削除完了" -ForegroundColor Green
         } else {
-            Write-Host "  lfm2.5:8b-a1b-q4_k_m: 見つかりません（スキップ）" -ForegroundColor Gray
+            Write-Host "  LFM2.5-1.2B-JP-202606: 見つかりません（スキップ）" -ForegroundColor Gray
         }
     } else {
         Write-Host "  Ollama が見つかりません（スキップ）" -ForegroundColor Gray
