@@ -185,7 +185,7 @@ def _model_cached(model_size: str) -> bool:
     return bool(glob.glob(pattern))
 
 
-def _do_transcribe(audio_path, engine, model_size, language, do_diarize, n_speakers_val, chunk_minutes_str, trim_start, trim_end):
+def _do_transcribe(audio_path, engine, model_size, language, do_diarize, diarize_backend, n_speakers_val, chunk_minutes_str, trim_start, trim_end):
     if audio_path is None:
         raise gr.Error("音声ファイルをアップロードしてください。")
 
@@ -254,7 +254,7 @@ def _do_transcribe(audio_path, engine, model_size, language, do_diarize, n_speak
     diarize_status = "⏳ 話者分離中（数分かかります）..."
     yield segments, exporter.segments_to_transcript(segments), gr.update(visible=False), gr.update(visible=False), diarize_status, gr.update(choices=["全話者"], value="全話者")
     try:
-        segments, backend = diarizer.diarize(audio_path, _SETTINGS.effective_hf_token(), segments, n_speakers=n_speakers)
+        segments, backend = diarizer.diarize(audio_path, _SETTINGS.effective_hf_token(), segments, n_speakers=n_speakers, backend=diarize_backend)
     except (ValueError, ImportError) as e:
         raise gr.Error(str(e)) from e
     except Exception as e:
@@ -640,6 +640,12 @@ def build_ui() -> gr.Blocks:
                             label="話者分離を実行（HF トークン必須）",
                             value=False,
                         )
+                        diarize_backend_dd = gr.Dropdown(
+                            label="話者分離の方式",
+                            choices=["auto", "nemotron"] if diarizer.NEMOTRON_AVAILABLE else ["auto"],
+                            value="auto",
+                            info="nemotron: 最大8話者・話者数は自動推定（失敗時は auto にフォールバック）",
+                        )
                         diarize_n_speakers = gr.Number(
                             label="話者数（空欄で自動検出）",
                             value=None,
@@ -755,7 +761,7 @@ def build_ui() -> gr.Blocks:
                 )
                 transcribe_btn.click(
                     fn=_do_transcribe,
-                    inputs=[audio_input, engine_radio, model_dd, lang_dd, diarize_chk, diarize_n_speakers, chunk_dd, trim_start_num, trim_end_num],
+                    inputs=[audio_input, engine_radio, model_dd, lang_dd, diarize_chk, diarize_backend_dd, diarize_n_speakers, chunk_dd, trim_start_num, trim_end_num],
                     outputs=[segments_state, transcript_box, speakers_df, apply_speakers_btn, status_md, filter_speaker_dd],
                 )
                 apply_speakers_btn.click(

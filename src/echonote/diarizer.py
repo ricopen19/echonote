@@ -5,7 +5,6 @@ from __future__ import annotations
 import functools
 import gc
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -195,6 +194,7 @@ def _diarize_pyannote(audio_path: str, hf_token: str, segments: list[dict]) -> l
 
 _NEMOTRON_DIR = Path(__file__).resolve().parents[2] / "experiments" / "nemotron"
 _NEMOTRON_TIMEOUT_SEC = 3600
+NEMOTRON_AVAILABLE = (_NEMOTRON_DIR / ".venv").is_dir()  # 未セットアップなら UI に出さない
 
 
 def _diarize_nemotron(audio_path: str, segments: list[dict]) -> list[dict]:
@@ -213,6 +213,7 @@ def diarize(
     hf_token: str,
     segments: list[dict],
     n_speakers: int | None = None,
+    backend: str = "auto",
 ) -> tuple[list[dict], str]:
     """話者分離を実行し、speaker キーを付加したセグメントと使用した backend 名を返す。
 
@@ -221,7 +222,7 @@ def diarize(
     """
     audio_path = str(audio_path)
 
-    if os.environ.get("ECHONOTE_DIARIZER") == "nemotron":
+    if backend == "nemotron":
         try:
             return _diarize_nemotron(audio_path, segments), "nemotron"
         except Exception as e:  # venv 無し・非0終了・JSON 不正・タイムアウト → resemblyzer へ
