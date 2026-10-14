@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import functools
 import gc
+import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 _CLUSTER_THRESHOLD = 0.45  # AgglomerativeClustering の cosine 距離閾値
@@ -131,18 +135,8 @@ def _detect_device() -> str:
     return "cpu"
 
 
-def _assign_speakers(diarization, segments: list[dict]) -> list[dict]:
-    """話者区間をセグメントに割り当てる（最大重複時間で判定）。"""
-    # pyannote 4.x は DiarizeOutput.speaker_diarization、3.x は Annotation を直接返す
-    annotation = getattr(
-        diarization, "speaker_diarization",
-        getattr(diarization, "diarization",
-        getattr(diarization, "annotation", diarization)),
-    )
-    turns = [
-        (turn.start, turn.end, speaker)
-        for turn, _, speaker in annotation.itertracks(yield_label=True)
-    ]
+def _assign_turns(turns: list[tuple[float, float, str]], segments: list[dict]) -> list[dict]:
+    """話者ターンをセグメントに割り当てる（最大重複の1話者。重ならなければ SPEAKER_00）。"""
     result = []
     for seg in segments:
         seg_start, seg_end = seg["start"], seg["end"]
@@ -155,6 +149,21 @@ def _assign_speakers(diarization, segments: list[dict]) -> list[dict]:
                 best_speaker = speaker
         result.append({**seg, "speaker": best_speaker})
     return result
+
+
+def _assign_speakers(diarization, segments: list[dict]) -> list[dict]:
+    """pyannote の出力から話者区間を取り出してセグメントに割り当てる。"""
+    # pyannote 4.x は DiarizeOutput.speaker_diarization、3.x は Annotation を直接返す
+    annotation = getattr(
+        diarization, "speaker_diarization",
+        getattr(diarization, "diarization",
+        getattr(diarization, "annotation", diarization)),
+    )
+    turns = [
+        (turn.start, turn.end, speaker)
+        for turn, _, speaker in annotation.itertracks(yield_label=True)
+    ]
+    return _assign_turns(turns, segments)
 
 
 def _diarize_pyannote(audio_path: str, hf_token: str, segments: list[dict]) -> list[dict]:
@@ -182,6 +191,21 @@ def _diarize_pyannote(audio_path: str, hf_token: str, segments: list[dict]) -> l
         gc.collect()
 
 
+# ── Nemotron 3 Diarization（別 venv + subprocess）────────────────────────────
+
+_NEMOTRON_DIR = Path(__file__).resolve().parents[2] / "experiments" / "nemotron"
+_NEMOTRON_TIMEOUT_SEC = 3600
+
+
+def _diarize_nemotron(audio_path: str, segments: list[dict]) -> list[dict]:
+    proc = subprocess.run(
+        ["uv", "run", "--project", str(_NEMOTRON_DIR), "python", str(_NEMOTRON_DIR / "run.py"), audio_path],
+        capture_output=True, text=True, timeout=_NEMOTRON_TIMEOUT_SEC, check=True,
+    )
+    turns = [(float(t["start"]), float(t["end"]), str(t["speaker"])) for t in json.loads(proc.stdout)]
+    return _assign_turns(turns, segments)
+
+
 # ── 公開 API ──────────────────────────────────────────────────────────────────
 
 def diarize(
@@ -189,17 +213,23 @@ def diarize(
     hf_token: str,
     segments: list[dict],
     n_speakers: int | None = None,
-) -> list[dict]:
-    """話者分離を実行し、各セグメントに speaker キーを付加して返す。
+) -> tuple[list[dict], str]:
+    """話者分離を実行し、speaker キーを付加したセグメントと使用した backend 名を返す。
 
     resemblyzer が利用可能な場合は HF トークン不要で実行する。
     未インストールの場合は pyannote-audio にフォールバックする（HF トークン必須）。
     """
     audio_path = str(audio_path)
 
+    if os.environ.get("ECHONOTE_DIARIZER") == "nemotron":
+        try:
+            return _diarize_nemotron(audio_path, segments), "nemotron"
+        except Exception as e:  # venv 無し・非0終了・JSON 不正・タイムアウト → resemblyzer へ
+            print(f"[echonote] nemotron 失敗、resemblyzer へフォールバック: {type(e).__name__}: {e}", file=sys.stderr)
+
     try:
         import resemblyzer  # noqa: F401
-        return _diarize_resemblyzer(audio_path, segments, n_speakers=n_speakers)
+        return _diarize_resemblyzer(audio_path, segments, n_speakers=n_speakers), "resemblyzer"
     except ImportError:
         pass
 
@@ -207,7 +237,7 @@ def diarize(
         raise ValueError(
             "HuggingFace トークンが未設定です。設定タブで HF_TOKEN を入力してください。"
         )
-    return _diarize_pyannote(audio_path, hf_token, segments)
+    return _diarize_pyannote(audio_path, hf_token, segments), "pyannote"
 
 
 def _smooth_turns(timeline: list[dict], min_sec: float) -> list[dict]:

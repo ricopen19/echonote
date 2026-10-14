@@ -254,7 +254,7 @@ def _do_transcribe(audio_path, engine, model_size, language, do_diarize, n_speak
     diarize_status = "⏳ 話者分離中（数分かかります）..."
     yield segments, exporter.segments_to_transcript(segments), gr.update(visible=False), gr.update(visible=False), diarize_status, gr.update(choices=["全話者"], value="全話者")
     try:
-        segments = diarizer.diarize(audio_path, _SETTINGS.effective_hf_token(), segments, n_speakers=n_speakers)
+        segments, backend = diarizer.diarize(audio_path, _SETTINGS.effective_hf_token(), segments, n_speakers=n_speakers)
     except (ValueError, ImportError) as e:
         raise gr.Error(str(e)) from e
     except Exception as e:
@@ -264,7 +264,7 @@ def _do_transcribe(audio_path, engine, model_size, language, do_diarize, n_speak
 
     speakers = sorted({s.get("speaker", "") for s in segments if s.get("speaker")})
     df_data = [[spk, ""] for spk in speakers]
-    done = f"✅ 文字起こし + 話者分離完了（{len(segments)} セグメント）"
+    done = f"✅ 文字起こし + 話者分離完了（{len(segments)} セグメント / {backend}）"
     yield (
         segments,
         exporter.segments_to_transcript(segments),
