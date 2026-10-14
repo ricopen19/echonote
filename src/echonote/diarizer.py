@@ -8,6 +8,10 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from typing import Literal
+
+DiarizeBackend = Literal["auto", "nemotron"]  # 呼び出し側が選べる方式
+UsedBackend = Literal["nemotron", "resemblyzer", "pyannote"]  # 実際に使われた方式
 
 _CLUSTER_THRESHOLD = 0.45  # AgglomerativeClustering の cosine 距離閾値
 _MERGE_MIN_SEC = 2.0        # これ未満のセグメントは直前に結合してからembeddingを計算する
@@ -213,12 +217,14 @@ def diarize(
     hf_token: str,
     segments: list[dict],
     n_speakers: int | None = None,
-    backend: str = "auto",
-) -> tuple[list[dict], str]:
-    """話者分離を実行し、speaker キーを付加したセグメントと使用した backend 名を返す。
+    backend: DiarizeBackend = "auto",
+) -> tuple[list[dict], UsedBackend]:
+    """話者分離を実行し、speaker キーを付加したセグメントと実際に使った backend 名を返す。
 
-    resemblyzer が利用可能な場合は HF トークン不要で実行する。
-    未インストールの場合は pyannote-audio にフォールバックする（HF トークン必須）。
+    Args:
+        backend: "nemotron" なら Nemotron 3 Diarization を先に試し、失敗時は auto と同じ経路へ
+            フォールバックする（n_speakers は無視される）。"auto" は resemblyzer（HF トークン不要）を
+            優先し、未インストールなら pyannote-audio（HF トークン必須）を使う。
     """
     audio_path = str(audio_path)
 

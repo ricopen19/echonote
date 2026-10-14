@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import tempfile
 from pathlib import Path
+from typing import get_args
 
 import gradio as gr
 
@@ -642,7 +643,7 @@ def build_ui() -> gr.Blocks:
                         )
                         diarize_backend_dd = gr.Dropdown(
                             label="話者分離の方式",
-                            choices=["auto", "nemotron"] if diarizer.NEMOTRON_AVAILABLE else ["auto"],
+                            choices=list(get_args(diarizer.DiarizeBackend)) if diarizer.NEMOTRON_AVAILABLE else ["auto"],
                             value="auto",
                             info="nemotron: 最大8話者・話者数は自動推定（失敗時は auto にフォールバック）",
                         )
