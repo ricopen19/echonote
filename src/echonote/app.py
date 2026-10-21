@@ -638,7 +638,7 @@ def build_ui() -> gr.Blocks:
                             value=settings.effective_language(),
                         )
                         diarize_chk = gr.Checkbox(
-                            label="話者分離を実行（HF トークン必須）",
+                            label="話者分離を実行（pyannote のときのみ HF トークン必須）",
                             value=False,
                         )
                         diarize_backend_dd = gr.Dropdown(
