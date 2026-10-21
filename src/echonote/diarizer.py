@@ -17,6 +17,62 @@ _CLUSTER_THRESHOLD = 0.45  # AgglomerativeClustering の cosine 距離閾値
 _MERGE_MIN_SEC = 2.0        # これ未満のセグメントは直前に結合してからembeddingを計算する
 
 
+KRule = int | Literal["threshold", "silhouette"]  # 話者数の指定 / 距離の閾値 / silhouette 探索
+_MIN_SPEAKER_RATIO = 0.03  # 発話時間がこの割合未満の話者は最近傍の話者に統合する
+
+
+def cluster_speakers(embeddings, durations: list[float], k_rule: KRule) -> list[str]:
+    """埋め込み1行につき話者ラベル1つを返す。呼び出し側は len(embeddings) == len(durations) を守る。"""
+    import numpy as np
+    from sklearn.cluster import AgglomerativeClustering
+
+    arr = np.asarray(embeddings)
+    if len(arr) <= 1:
+        return ["SPEAKER_00"] * len(arr)
+
+    def fit(**kw) -> list[int]:
+        return AgglomerativeClustering(metric="cosine", linkage="average", **kw).fit_predict(arr).tolist()
+
+    if isinstance(k_rule, int):
+        labels = fit(n_clusters=min(max(2, k_rule), len(arr)))
+    elif k_rule == "threshold":
+        labels = fit(n_clusters=None, distance_threshold=_CLUSTER_THRESHOLD)
+    else:
+        from sklearn.metrics import silhouette_score
+
+        best_k, best_score = 2, -1.0
+        for k in range(2, min(12, len(arr) - 1) + 1):
+            score = float(silhouette_score(arr, fit(n_clusters=k), metric="cosine"))
+            if score > best_score:
+                best_score, best_k = score, k
+        labels = fit(n_clusters=best_k)
+
+    # 少数話者の統合
+    if len(set(labels)) > 1:
+        label_times: dict[int, float] = {}
+        for lbl, dur in zip(labels, durations):
+            label_times[lbl] = label_times.get(lbl, 0.0) + dur
+        min_time = sum(label_times.values()) * _MIN_SPEAKER_RATIO
+        kept = {lbl for lbl, t in label_times.items() if t >= min_time} or {max(label_times, key=label_times.get)}
+        if len(kept) < len(label_times):
+            centroids = {lbl: arr[[i for i, l in enumerate(labels) if l == lbl]].mean(axis=0) for lbl in label_times}
+
+            def cos_dist(a, b) -> float:
+                return 1.0 - float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-8))
+
+            remap = {
+                lbl: lbl if lbl in kept else min(kept, key=lambda o: cos_dist(centroids[lbl], centroids[o]))
+                for lbl in label_times
+            }
+            labels = [remap[l] for l in labels]
+
+    # 登場順に話者ラベルを振る
+    names: dict[int, str] = {}
+    for lbl in labels:
+        names.setdefault(lbl, f"SPEAKER_{len(names):02d}")
+    return [names[l] for l in labels]
+
+
 def _ensure_pkg_resources() -> None:
     import sys, types
     if "pkg_resources" not in sys.modules:
@@ -62,7 +118,6 @@ def _diarize_resemblyzer(audio_path: str, segments: list[dict], n_speakers: int 
     _ensure_pkg_resources()
     from resemblyzer import VoiceEncoder, preprocess_wav
     import numpy as np
-    from sklearn.cluster import AgglomerativeClustering
 
     wav = preprocess_wav(audio_path)
     sr = 16_000
@@ -75,28 +130,9 @@ def _diarize_resemblyzer(audio_path: str, segments: list[dict], n_speakers: int 
         return [{**seg, "speaker": "SPEAKER_00"} for seg in segments]
 
     arr = np.array(embeddings)
-    if len(arr) == 1:
-        raw_labels = [0]
-    elif n_speakers is not None:
-        k = min(max(2, n_speakers), len(arr))
-        raw_labels = AgglomerativeClustering(
-            n_clusters=k, metric="cosine", linkage="average"
-        ).fit_predict(arr).tolist()
-    else:
-        raw_labels = AgglomerativeClustering(
-            n_clusters=None,
-            distance_threshold=_CLUSTER_THRESHOLD,
-            metric="cosine",
-            linkage="average",
-        ).fit_predict(arr).tolist()
-
-    # 結合後インデックス → 話者名
-    label_map: dict[int, str] = {}
-    merged_speakers: dict[int, str] = {}
-    for merged_idx, label in zip(valid_merged_indices, raw_labels):
-        if label not in label_map:
-            label_map[label] = f"SPEAKER_{len(label_map):02d}"
-        merged_speakers[merged_idx] = label_map[label]
+    durations = [merged_segs[i]["end"] - merged_segs[i]["start"] for i in valid_merged_indices]
+    speakers = cluster_speakers(arr, durations, n_speakers or "threshold")
+    merged_speakers = dict(zip(valid_merged_indices, speakers))
 
     # 元セグメントへ逆マッピング
     return [
@@ -306,7 +342,6 @@ def diarize_standalone(
     import numpy as np
     import webrtcvad
     from resemblyzer import VoiceEncoder, preprocess_wav
-    from sklearn.cluster import AgglomerativeClustering
 
     audio_path = str(audio_path)
     wav = preprocess_wav(audio_path)
@@ -345,72 +380,9 @@ def diarize_standalone(
 
     arr = np.array(embeddings)
 
-    # クラスタリング
-    if n_speakers is not None:
-        k = min(max(2, n_speakers), len(arr))
-        if k < 2:
-            raw_labels: list[int] = [0] * len(arr)
-        else:
-            raw_labels = AgglomerativeClustering(
-                n_clusters=k, metric="cosine", linkage="average"
-            ).fit_predict(arr).tolist()
-    elif len(arr) < 2:
-        raw_labels = [0] * len(arr)
-    else:
-        # シルエットスコアで最適k自動検出
-        from sklearn.metrics import silhouette_score
-
-        max_k = min(12, len(arr) - 1)
-        best_k, best_score = 2, -1.0
-        for k in range(2, max_k + 1):
-            labels = AgglomerativeClustering(
-                n_clusters=k, metric="cosine", linkage="average"
-            ).fit_predict(arr)
-            score = float(silhouette_score(arr, labels, metric="cosine"))
-            if score > best_score:
-                best_score, best_k = score, k
-        raw_labels = AgglomerativeClustering(
-            n_clusters=best_k, metric="cosine", linkage="average"
-        ).fit_predict(arr).tolist()
-
-    # 発話時間が全体の3%未満の話者を最近傍クラスタに統合（n_speakers 指定時も適用）
-    if len(set(raw_labels)) > 1:
-        label_times: dict[int, float] = {}
-        for idx, lbl in zip(valid_indices, raw_labels):
-            dur = raw_segs[idx]["end"] - raw_segs[idx]["start"]
-            label_times[lbl] = label_times.get(lbl, 0.0) + dur
-
-        min_time = sum(label_times.values()) * 0.03
-        valid_lbls = {lbl for lbl, t in label_times.items() if t >= min_time}
-
-        if len(valid_lbls) < len(set(raw_labels)):
-            centroids = {
-                lbl: arr[[i for i, l in enumerate(raw_labels) if l == lbl]].mean(axis=0)
-                for lbl in set(raw_labels)
-            }
-            remap: dict[int, int] = {}
-            for lbl in set(raw_labels):
-                if lbl not in valid_lbls:
-                    best_l, best_d = lbl, float("inf")
-                    for other in valid_lbls:
-                        c1, c2 = centroids[lbl], centroids[other]
-                        d = 1.0 - float(
-                            np.dot(c1, c2) / (np.linalg.norm(c1) * np.linalg.norm(c2) + 1e-8)
-                        )
-                        if d < best_d:
-                            best_d, best_l = d, other
-                    remap[lbl] = best_l
-                else:
-                    remap[lbl] = lbl
-            raw_labels = [remap[l] for l in raw_labels]
-
-    # 話者名マッピング（出現順）
-    label_map: dict[int, str] = {}
-    seg_speakers: dict[int, str] = {}
-    for idx, lbl in zip(valid_indices, raw_labels):
-        if lbl not in label_map:
-            label_map[lbl] = f"SPEAKER_{len(label_map):02d}"
-        seg_speakers[idx] = label_map[lbl]
+    durations = [raw_segs[i]["end"] - raw_segs[i]["start"] for i in valid_indices]
+    speakers = cluster_speakers(arr, durations, n_speakers or "silhouette")
+    seg_speakers = dict(zip(valid_indices, speakers))
 
     timeline = [
         {"start": seg["start"], "end": seg["end"], "speaker": seg_speakers.get(i, "SPEAKER_00")}
