@@ -81,6 +81,15 @@ def _ensure_pkg_resources() -> None:
         sys.modules["pkg_resources"] = _stub
 
 
+def _load_wav(audio_path: str):
+    """16kHz モノラルで読み、音量だけをそろえる。preprocess_wav と違い無音を削らない（区間の時刻を保つため）。"""
+    import librosa
+    from resemblyzer.audio import normalize_volume
+
+    wav, _ = librosa.load(audio_path, sr=16_000, mono=True)
+    return normalize_volume(wav, -30, increase_only=True)
+
+
 def _embed_segments(wav, sr: int, segs: list[dict], encoder) -> tuple[list, list[int]]:
     embeddings: list = []
     valid_indices: list[int] = []
@@ -116,10 +125,10 @@ def _merge_short_segments(segments: list[dict]) -> tuple[list[dict], list[int]]:
 
 def _diarize_resemblyzer(audio_path: str, segments: list[dict], n_speakers: int | None = None) -> list[dict]:
     _ensure_pkg_resources()
-    from resemblyzer import VoiceEncoder, preprocess_wav
+    from resemblyzer import VoiceEncoder
     import numpy as np
 
-    wav = preprocess_wav(audio_path)
+    wav = _load_wav(audio_path)
     sr = 16_000
     encoder = VoiceEncoder("cpu")
 
@@ -341,10 +350,10 @@ def diarize_standalone(
     _ensure_pkg_resources()
     import numpy as np
     import webrtcvad
-    from resemblyzer import VoiceEncoder, preprocess_wav
+    from resemblyzer import VoiceEncoder
 
     audio_path = str(audio_path)
-    wav = preprocess_wav(audio_path)
+    wav = _load_wav(audio_path)
     sr = 16_000
     duration = len(wav) / sr
 
