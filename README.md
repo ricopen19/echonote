@@ -105,7 +105,7 @@ LLM のモデル名の既定値は、PC の性能（HW ティア）で自動的�
 uv sync --extra mac --extra diarization
 
 # LLM サーバーを起動（別ターミナル）
-uvx --from mlx-lm mlx_lm.server --model <モデル名>
+ollama serve
 
 # Echonote を起動
 uv run echonote
@@ -113,4 +113,4 @@ uv run echonote
 
 ### 初回設定（設定タブ）
 
-Mac の LLM エンドポイント URL の既定値は `http://localhost:8080/v1`（mlx-lm）です。Ollama を使う場合は `http://localhost:11434/v1` に変えてください。モデル名の既定値は Windows と同じく HW ティアで決まります。
+URL とモデル名の既定値は Windows と同じです。mlx-lm を使う場合は、環境変数 `ECHONOTE_LLM_URL`（例: `http://localhost:8080/v1`）と `ECHONOTE_LLM_MODEL` を設定してから起動してください。

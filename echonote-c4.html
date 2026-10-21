@@ -21,7 +21,7 @@
 flowchart LR
   user["利用者<br/>[Person]<br/>録音を文字起こしし記録を作る"]
   echo["echonote<br/>[System]<br/>文字起こし・話者分離・記録生成"]
-  llm["ローカル LLM サーバー<br/>[External]<br/>Ollama :11434 / mlx-lm :8080"]
+  llm["ローカル LLM サーバー<br/>[External]<br/>Ollama :11434（mlx-lm は環境変数で指定）"]
   hf["Hugging Face Hub<br/>[External]<br/>Whisper・moonshine・pyannote のモデル"]
   ffmpeg["ffmpeg<br/>[External]<br/>音声の変換・分割・無音検出"]
   user -->|"ブラウザで操作"| echo
@@ -56,7 +56,7 @@ flowchart TB
   nemo -->|"モデル取得"| hf
   mock -.->|"見た目の検討用。本体とつながりなし（推定）"| app
 </div>
-<p class="note">照合済み: start.bat の起動コマンドと ollama serve、setup.ps1:21,66,79 の winget・uv sync・ollama pull、diarizer.py の nemotron 呼び出し（uv run --project）、app.py:598,831,894,981 のタブ。推定（点線）: UI モックアップは import も起動スクリプトからの参照もないので、本体とは独立した検討用と判断した。未検証: Mac の LLM サーバー（8080 の mlx-lm）を実際に誰が起動するか。省略: tests/、experiments/ の実験スクリプト（moonshine_test.py 等）、scripts/make-release.sh。</p>
+<p class="note">照合済み: start.bat の起動コマンドと ollama serve、setup.ps1:21,66,79 の winget・uv sync・ollama pull、diarizer.py の nemotron 呼び出し（uv run --project）、app.py:598,831,894,981 のタブ。推定（点線）: UI モックアップは import も起動スクリプトからの参照もないので、本体とは独立した検討用と判断した。LLM サーバーの起動: Windows は start.bat、Mac は利用者が手で ollama serve を実行する。省略: tests/、experiments/ の実験スクリプト（moonshine_test.py 等）、scripts/make-release.sh。</p>
 
 <h2>Level 3: コンポーネント（Gradio アプリ）</h2>
 <p>Gradio アプリを掘った。今回の作業（R1・R4・R5）で触った話者分離がここにあり、モジュールの依存が一番多いため。</p>

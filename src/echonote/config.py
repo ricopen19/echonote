@@ -29,7 +29,7 @@ _TIER_MODELS = {
 }
 
 _DEFAULT_LLM_URL = {
-    Platform.MAC: "http://localhost:8080/v1",
+    Platform.MAC: "http://localhost:11434/v1",
     Platform.WINDOWS: "http://localhost:11434/v1",
     Platform.LINUX: "http://localhost:11434/v1",
 }
