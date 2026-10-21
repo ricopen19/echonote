@@ -53,8 +53,8 @@ def cluster_speakers(embeddings, durations: list[float], k_rule: KRule) -> list[
         for lbl, dur in zip(labels, durations):
             label_times[lbl] = label_times.get(lbl, 0.0) + dur
         min_time = sum(label_times.values()) * _MIN_SPEAKER_RATIO
-        kept = {lbl for lbl, t in label_times.items() if t >= min_time} or {max(label_times, key=label_times.get)}
-        if len(kept) < len(label_times):
+        kept = {lbl for lbl, t in label_times.items() if t >= min_time}
+        if kept and len(kept) < len(label_times):  # 全員 3% 未満なら統合しない
             centroids = {lbl: arr[[i for i, l in enumerate(labels) if l == lbl]].mean(axis=0) for lbl in label_times}
 
             def cos_dist(a, b) -> float:
