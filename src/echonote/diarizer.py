@@ -13,7 +13,7 @@ from typing import Literal
 DiarizeBackend = Literal["auto", "nemotron"]  # 呼び出し側が選べる方式
 UsedBackend = Literal["nemotron", "resemblyzer", "pyannote"]  # 実際に使われた方式
 
-_CLUSTER_THRESHOLD = 0.45  # AgglomerativeClustering の cosine 距離閾値
+_CLUSTER_THRESHOLD = 0.25  # AgglomerativeClustering の cosine 距離閾値
 _MERGE_MIN_SEC = 2.0        # これ未満のセグメントは直前に結合してからembeddingを計算する
 
 
