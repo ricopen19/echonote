@@ -80,23 +80,32 @@ cd echonote
 4. テンプレートを選んで「▶ 記録を生成」
 5. 「📥 Markdown をダウンロード」で保存
 
+### 話者分離
+
+- 「📝 文字起こし」タブで「話者分離を実行」にチェックを入れると、発言ごとに話者ラベルが付きます。既定の方式（resemblyzer）は HF トークン不要です
+- 文字起こし済みのテキストがある場合は「📋 貼り付け転写」タブを使います。音声とテキストを渡すと、Whisper を使わずに話者だけを割り当てます（非力な PC 向け）
+
 ### 初回設定（設定タブ）
+
+LLM のモデル名の既定値は、PC の性能（HW ティア）で自動的に決まります。
 
 | 項目 | 値 |
 |---|---|
-| LLM エンドポイント URL | `http://localhost:11434/v1` |
-| LLM モデル名 | `qwen3:4b-q4_K_M` |
+| LLM エンドポイント URL | `http://localhost:11434/v1`（Ollama） |
+| LLM モデル名（Light） | `qwen3:1.7b` |
+| LLM モデル名（Standard） | `hf.co/LiquidAI/LFM2.5-1.2B-JP-202606-GGUF:Q4_K_M` |
+| LLM モデル名（Performance） | `qwen3:14b-q4_K_M` |
 
 ---
 
 ## Mac セットアップ（開発者向け）
 
 ```bash
-# mlx-whisper（Apple Silicon 最適化）を含めてインストール
-uv sync --extra mac
+# mlx-whisper（Apple Silicon 最適化）と話者分離を含めてインストール
+uv sync --extra mac --extra diarization
 
 # LLM サーバーを起動（別ターミナル）
-ollama serve
+uvx --from mlx-lm mlx_lm.server --model <モデル名>
 
 # Echonote を起動
 uv run echonote
@@ -104,7 +113,4 @@ uv run echonote
 
 ### 初回設定（設定タブ）
 
-| 項目 | 値 |
-|---|---|
-| LLM エンドポイント URL | `http://localhost:11434/v1` |
-| LLM モデル名 | `qwen3:4b-q4_K_M` |
+Mac の LLM エンドポイント URL の既定値は `http://localhost:8080/v1`（mlx-lm）です。Ollama を使う場合は `http://localhost:11434/v1` に変えてください。モデル名の既定値は Windows と同じく HW ティアで決まります。
